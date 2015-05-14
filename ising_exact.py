@@ -1,17 +1,15 @@
 #!/usr/bin/python
-
 """
-Created on Tues Mar  4 2014
+Created on May  14 2015
 
 @author: Analabha Roy (daneel@utexas.edu)
 
-Usage : ./isingrand_esys.py -h
+Usage : ./ising_exact.py -h
 """
-import sys
+import sys, argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import argparse
 from pprint import pprint
 from itertools import combinations
 
@@ -19,7 +17,7 @@ from itertools import combinations
 Default Parameters are entered here
 """
 #Lattice size
-L = 7
+L = 6
 t_init = 0.0 # Initial time
 t_final = 60.0 # Final time
 n_steps = 1000 # Number of time steps
@@ -27,8 +25,14 @@ n_steps = 1000 # Number of time steps
 #Power law decay of interactions
 beta = 1.0
 
-desc = """exact Diagonalization for 1d Ising model with
-		long range interactions"""
+desc = """Dynamics by exact diagonalization of 
+		1d Ising model with long range interactions"""
+
+#Pauli matrices
+sig_x, sig_y, sig_z = \
+  np.array([[0j, 1.0+0j], [1.0+0j, 0j]]), \
+    np.array([[0j, -1j], [1j, 0j]]), \
+      np.array([[1.0+0j, 0j], [0j, -1+0j]])  
 
 def input():
   parser = argparse.ArgumentParser(description=desc)
@@ -111,9 +115,7 @@ def get_jmat_pbc(args):
   return J
 
 class ParamData:
-  description = """Class to store parameters and time-independent
-		      part of Jacobian. Set "s_order" to True 
-						when doing 2nd order"""
+  description = """Class to store parameters and hopping matrix"""
   def __init__(self, args):
       #Copy arguments from parser to this class
       self.__dict__.update(args.__dict__)
@@ -181,6 +183,7 @@ class Hamiltonian:
     return (ke_x, ke_y, ke_z) 
   
   def offd_corrmats(self, sitepair):
+    lsize = self.lattice_size
     (mu, nu) = sitepair
     #Left Hand Side    
     if(mu == 0):
@@ -198,7 +201,7 @@ class Hamiltonian:
       np.kron(cxy, sig_y), np.kron(cxz, sig_z), np.kron(cyz, sig_z) 
     #Right Hand Side    
     if(nu < self.lattice_size - 1):
-      id = np.eye(2**(L-nu-1),2**(L-nu-1))
+      id = np.eye(2**(lsize-nu-1),2**(lsize-nu-1))
       cxy, cxz, cyz = \
       np.kron(cxy, id), np.kron(cxz, id), np.kron(cyz, id)
     return (cxy, cxz, cyz) 
@@ -224,6 +227,8 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     H += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
+    H = H/self.lattice_size
+    
     try:
 	evals, U = np.linalg.eigh(-H)
 	idx = evals.argsort()
@@ -232,6 +237,15 @@ class Hamiltonian:
 	self.esys = (evals, U)
     except np.linalg.linalg.LinAlgError:
 	self.esys = None
+  
+  def rotate_to_ebasis(self, op):
+    return self.esys[1].dot(op.dot(self.esys[1].T))
+  
+  def observable(self, op, times, state):
+    return np.array([np.vdot(state, \
+      np.diag(np.exp(-1j * self.esys[0] * t)).dot(\
+	op.dot(np.diag(np.exp(1j * self.esys[0] * t)))).dot(state)) \
+	  for t in times])
 
 class OutData:
   description = """Class to store output data"""
@@ -261,147 +275,102 @@ class OutData:
 	np.vstack((self.t_output, self.sxzvar)).T, delimiter=' ')
       np.savetxt(self.output_syzvar, \
 	np.vstack((self.t_output, self.syzvar)).T, delimiter=' ')
-	  
-#Pauli matrices
-sig_x,sig_y,sig_z = np.array([[0,1],[1,0]]),np.array([[0,-1j],[1j,0]]),\
-np.array([[1,0],[0,-1]])                    
-
+     
 def runising_dyn(params):
   if params.verbose:
     print "Executing diagonalization with parameters:"
     pprint(vars(params), depth=1)
   else:
     print "Starting run ..."
-  hamilt = Hamiltonian(params)  
+ 
+  h = Hamiltonian(params)  
   
-  if hamilt.esys is not None:
+  if h.esys is not None:
     
-    lsize = hamilt.lattice_size
+    lsize = h.lattice_size
     lsq = lsize * lsize
-    
-    sx = np.sum(np.array([hamilt.nummats(mu)[0] \
-      for mu in xrange(hamilt.lattice_size)]), axis=0)
-    sy = np.sum(np.array([hamilt.nummats(mu)[1] \
-      for mu in xrange(hamilt.lattice_size)]), axis=0)
-    sz = np.sum(np.array([hamilt.nummats(mu)[2] \
-      for mu in xrange(hamilt.lattice_size)]), axis=0)
+        
+    sx = np.sum(np.array([h.nummats(mu)[0] \
+      for mu in xrange(h.lattice_size)]), axis=0)
+    sy = np.sum(np.array([h.nummats(mu)[1] \
+      for mu in xrange(h.lattice_size)]), axis=0)
+    sz = np.sum(np.array([h.nummats(mu)[2] \
+      for mu in xrange(h.lattice_size)]), axis=0)
     sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
     
-    sxvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.kemats(sitepair)[0] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
-    syvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.kemats(sitepair)[1] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
-    szvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.kemats(sitepair)[2] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
+    sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+    syvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[1] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+    szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     sxvar, syvar, szvar = sxvar/lsq, syvar/lsq, szvar/lsq
     
     sxyvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.offd_corrmats(sitepair)[0] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
+      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
+	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     sxzvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.offd_corrmats(sitepair)[1] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
+      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[1] \
+	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     syzvar = np.sum(np.array(\
-      [hamilt.jmat[sitepair] * hamilt.offd_corrmats(sitepair)[2] \
-	for sitepair in combinations(\
-	  xrange(hamilt.lattice_size),2)]), axis=0)
+      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[2] \
+	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     sxyvar, sxzvar, syzvar = sxyvar/lsq, sxzvar/lsq, syzvar/lsq
     
     #mag_(x,y,z) are the magnetization operators in the diagonal basis
-    mag_x = np.transpose(hamilt.esys[1]).dot(sx.dot(hamilt.esys[1]))
-    mag_y = np.transpose(hamilt.esys[1]).dot(sy.dot(hamilt.esys[1]))
-    mag_z = np.transpose(hamilt.esys[1]).dot(sz.dot(hamilt.esys[1]))
-    
+    mag_x = h.rotate_to_ebasis(sx)
+    mag_y = h.rotate_to_ebasis(sy)
+    mag_z = h.rotate_to_ebasis(sz)
+        
     #corr_ab are the ab correlation operators in the diagonal basis
-    corr_xx = np.transpose(hamilt.esys[1]).dot(sxvar.dot(hamilt.esys[1]))
-    corr_yy = np.transpose(hamilt.esys[1]).dot(syvar.dot(hamilt.esys[1]))
-    corr_zz = np.transpose(hamilt.esys[1]).dot(szvar.dot(hamilt.esys[1]))
-    corr_xy = np.transpose(hamilt.esys[1]).dot(sxyvar.dot(hamilt.esys[1]))
-    corr_xz = np.transpose(hamilt.esys[1]).dot(sxzvar.dot(hamilt.esys[1]))
-    corr_yz = np.transpose(hamilt.esys[1]).dot(syzvar.dot(hamilt.esys[1]))
+    corr_xx = h.rotate_to_ebasis(sxvar)
+    corr_yy = h.rotate_to_ebasis(syvar)
+    corr_zz = h.rotate_to_ebasis(szvar)
+    corr_xy = h.rotate_to_ebasis(sxyvar)
+    corr_xz = h.rotate_to_ebasis(sxzvar)
+    corr_yz = h.rotate_to_ebasis(syzvar)
     
     #Now, the expectation value of any observable A is just
     # U^\dagger(t) A U(t). In the diagonal basis, U(t) is just
     #diag(e^{i e_n t}) where e_n are the eigenvals!
-    # So U(t) = np.diag(np.exp(1j*hamilt.esys[0]*t))
+    # So U(t) = np.diag(np.exp(1j*h.esys[0]*t))
     #Assume that psi_0 is all spins up ie (1 0 0 0 ... 0)
-    initstate = np.zeros(2**hamilt.lattice_size)
-    initstate[0] = 1.0
+    initstate = np.zeros(2**h.lattice_size, dtype=complex)
+    initstate[0] = 1.0 
+   
     dt = (t_final-t_init)/(n_steps-1.0)
     t_output = np.arange(t_init, t_final, dt)
     
-    sxdata = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      mag_x.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    sydata = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      mag_y.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    szdata = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      mag_z.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    sxvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_xx.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    syvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_yy.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    szvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_zz.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    sxyvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_xy.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    sxzvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_xz.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    syzvar_data = np.array([np.vdot(initstate, np.diag(\
-      np.exp(1j*hamilt.esys[0]*t)).T.conjugate().dot(\
-      corr_yz.dot(np.diag(np.exp(1j*hamilt.esys[0]*t)))).dot(initstate)) \
-	for t in t_output])
-    
-    data = OutData(t_output, sxdata, sydata, szdata, sxvar_data,\
-      syvar_data, szvar_data, sxyvar_data, sxzvar_data, syzvar_data, params)
+    sxdata = h.observable(mag_x, t_output, initstate)
+    sydata = h.observable(mag_y, t_output, initstate)
+    szdata = h.observable(mag_z, t_output, initstate)
+    sxvar_data = h.observable(corr_xx, t_output, initstate)
+    syvar_data = h.observable(corr_yy, t_output, initstate)
+    szvar_data = h.observable(corr_zz, t_output, initstate)
+    sxyvar_data = h.observable(corr_xy, t_output, initstate)
+    sxzvar_data = h.observable(corr_xz, t_output, initstate)
+    syzvar_data = h.observable(corr_yz, t_output, initstate)
+     
+    data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
+      np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
+	np.abs(szvar_data), np.abs(sxyvar_data), \
+	  np.abs(sxzvar_data), np.abs(syzvar_data), params)
     
     if params.verbose:
-      print "-----------------------------------"
-      #Plot the eigenvalues and eigenvectors and magnetization components
-      plt.plot(hamilt.esys[0].real/L)
+      #Plot the eigenvalues and eigenvectors
+      lsize = params.lattice_size
+      limits = (-2**lsize/100,2**lsize)
+      plt.plot(h.esys[0].real)
       plt.title('Eigenvalues - Sorted')
-      plt.matshow(np.abs(hamilt.esys[1])**2,interpolation='nearest',\
+      plt.matshow(np.abs(h.esys[1])**2,interpolation='nearest',\
       cmap=cm.coolwarm)
       plt.title('Eigenvectors - Sorted' ) 
       plt.colorbar()
       fig, ax = plt.subplots()
-      diag_cc = np.abs(hamilt.esys[1][0,:])**2
-      plt.bar(np.delete(np.arange(2**L+1),0),diag_cc,edgecolor='blue')                
+      diag_cc = np.abs(h.esys[1].dot(initstate))**2
+      print diag_cc
+      plt.bar(np.arange(2**lsize), diag_cc, edgecolor='blue')                
       plt.xlim(limits)
-      plt.text(L,-np.max(diag_cc)/10.0,'Transverse field = %lf'%tfield,\
-      horizontalalignment='center')
-      #plt.title('Transverse field = %lf'%tfield )
       plt.xscale('log')
       ax.xaxis.tick_top()
       ax.set_xlabel('Lexicographical order of eigenstate')
