@@ -19,7 +19,7 @@ Default Parameters are entered here
 #Lattice size
 L = 6
 t_init = 0.0 # Initial time
-t_final = 60.0 # Final time
+t_final = 5.0 # Final time
 n_steps = 1000 # Number of time steps
 
 #Power law decay of interactions
@@ -227,7 +227,6 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     H += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    H = H/self.lattice_size
     
     try:
 	evals, U = np.linalg.eigh(-H)
@@ -237,16 +236,24 @@ class Hamiltonian:
 	self.esys = (evals, U)
     except np.linalg.linalg.LinAlgError:
 	self.esys = None
+	
+  def evolve(self, obs, times, state):
+    #Given the eigensystem of time-translation,
+    #build the translation and evolve an obs
+    if self.esys is not None:
+      Z = self.esys[1].view(np.matrix)
+      omat = obs.view(np.matrix)
+      list_of_time_obs_data = []
+      for t in times:
+	Hdt = np.diagflat(\
+	  np.exp( (1j) * self.esys[0] * t )).view(np.matrix)
+	obs_tmat = Z.T * Hdt * Z * omat * Z.T * Hdt.T.conjugate() * Z
+	obs_t = obs_tmat.view(np.ndarray)
+        list_of_time_obs_data.append(np.vdot(state, np.dot(obs_t, state)))
+      return np.array(list_of_time_obs_data)
+    else:
+      return None
   
-  def rotate_to_ebasis(self, op):
-    return self.esys[1].dot(op.dot(self.esys[1].T))
-  
-  def observable(self, op, times, state):
-    return np.array([np.vdot(state, \
-      np.diag(np.exp(-1j * self.esys[0] * t)).dot(\
-	op.dot(np.diag(np.exp(1j * self.esys[0] * t)))).dot(state)) \
-	  for t in times])
-
 class OutData:
   description = """Class to store output data"""
   def __init__(self, t, sx, sy, sz, sxx, syy, szz, sxy, sxz, syz, params):
@@ -298,13 +305,17 @@ def runising_dyn(params):
       for mu in xrange(h.lattice_size)]), axis=0)
     sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
     
+    offset = np.eye(2**lsize, dtype=complex)
+    np.fill_diagonal(offset, (1/lsize))
+    
     sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     syvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[1] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    sxvar, syvar, szvar = sxvar/lsq, syvar/lsq, szvar/lsq
+    sxvar, syvar, szvar = \
+      (sxvar/lsq) + offset, (syvar/lsq + offset), (szvar/lsq) + offset
     
     sxyvar = np.sum(np.array(\
       [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
@@ -315,46 +326,33 @@ def runising_dyn(params):
     syzvar = np.sum(np.array(\
       [h.jmat[sitepair] * h.offd_corrmats(sitepair)[2] \
 	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    sxyvar, sxzvar, syzvar = sxyvar/lsq, sxzvar/lsq, syzvar/lsq
-    
-    #mag_(x,y,z) are the magnetization operators in the diagonal basis
-    mag_x = h.rotate_to_ebasis(sx)
-    mag_y = h.rotate_to_ebasis(sy)
-    mag_z = h.rotate_to_ebasis(sz)
+    sxyvar, sxzvar, syzvar = \
+      (sxyvar/lsq) + offset, (sxzvar/lsq) + offset, (syzvar/lsq) + offset
         
-    #corr_ab are the ab correlation operators in the diagonal basis
-    corr_xx = h.rotate_to_ebasis(sxvar)
-    corr_yy = h.rotate_to_ebasis(syvar)
-    corr_zz = h.rotate_to_ebasis(szvar)
-    corr_xy = h.rotate_to_ebasis(sxyvar)
-    corr_xz = h.rotate_to_ebasis(sxzvar)
-    corr_yz = h.rotate_to_ebasis(syzvar)
-    
     #Now, the expectation value of any observable A is just
-    # U^\dagger(t) A U(t). In the diagonal basis, U(t) is just
-    #diag(e^{i e_n t}) where e_n are the eigenvals!
-    # So U(t) = np.diag(np.exp(1j*h.esys[0]*t))
-    #Assume that psi_0 is all spins up ie (1 0 0 0 ... 0)
-    initstate = np.zeros(2**h.lattice_size, dtype=complex)
-    initstate[0] = 1.0 
-   
+    # U^\dagger(t) A U(t). In the canonical basis, U(t) is just
+    #\sum_n e^{i e_n t}|n><n| where e_n are the eigenvals!
+    #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
+    E, U = np.linalg.eigh(lsize * sx)
+    initstate =  U[:,E.argsort()][-1]
+     
     dt = (t_final-t_init)/(n_steps-1.0)
     t_output = np.arange(t_init, t_final, dt)
     
-    sxdata = h.observable(mag_x, t_output, initstate)
-    sydata = h.observable(mag_y, t_output, initstate)
-    szdata = h.observable(mag_z, t_output, initstate)
-    sxvar_data = h.observable(corr_xx, t_output, initstate)
-    syvar_data = h.observable(corr_yy, t_output, initstate)
-    szvar_data = h.observable(corr_zz, t_output, initstate)
-    sxyvar_data = h.observable(corr_xy, t_output, initstate)
-    sxzvar_data = h.observable(corr_xz, t_output, initstate)
-    syzvar_data = h.observable(corr_yz, t_output, initstate)
-     
+    sxdata = h.evolve(sx, t_output, initstate)/lsize
+    sydata = h.evolve(sy, t_output, initstate)/lsize
+    szdata = h.evolve(sz, t_output, initstate)/lsize
+    sxvar_data = h.evolve(sxvar, t_output, initstate)
+    syvar_data = h.evolve(syvar, t_output, initstate)
+    szvar_data = h.evolve(szvar, t_output, initstate)
+    sxyvar_data = h.evolve(sxyvar, t_output, initstate)
+    sxzvar_data = h.evolve(sxzvar, t_output, initstate)
+    syzvar_data = h.evolve(syzvar, t_output, initstate)
+    
     data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
       np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
-	np.abs(szvar_data), np.abs(sxyvar_data), \
-	  np.abs(sxzvar_data), np.abs(syzvar_data), params)
+    	np.abs(szvar_data), np.abs(sxyvar_data), \
+    	      np.abs(sxzvar_data), np.abs(syzvar_data), params)
     
     if params.verbose:
       #Plot the eigenvalues and eigenvectors
