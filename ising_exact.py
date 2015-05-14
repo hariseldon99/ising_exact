@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 """
 Created on May  14 2015
 
@@ -94,7 +94,7 @@ def input():
 def get_jmat_obc(args):
   lsize = args.lattice_size
   #Set the diagonal bands of the matrix
-  J = np.sum(np.diagflat(np.full(lsize-i, pow(i, -args.beta)), i) \
+  J = np.sum(np.diagflat(np.ones(lsize-i)*pow(i, -args.beta), i) \
     for i in xrange(1, lsize))
   J = J+J.T
   np.fill_diagonal(J, 0)
@@ -106,9 +106,9 @@ def get_jmat_pbc(args):
   lsize = args.lattice_size
   mid_diag = np.floor(lsize/2).astype(int)
   #Set the diagonal bands of the matrix
-  J = np.sum(np.diagflat(np.full(lsize-i, pow(i, -args.beta)), i) \
+  J = np.sum(np.diagflat(np.ones(lsize-i)*pow(i, -args.beta), i) \
     for i in xrange(1, mid_diag+1))+\
-      np.sum(np.diagflat(np.full(lsize-i, pow(lsize-i, -args.beta)), i)\
+      np.sum(np.diagflat(np.ones(lsize-i)*pow(lsize-i, -args.beta), i)\
 	for i in xrange(mid_diag+1, lsize))
   J = J + J.T
   np.fill_diagonal(J, 0)
