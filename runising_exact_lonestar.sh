@@ -6,10 +6,10 @@
 #$ -o $JOB_NAME.o$JOB_ID	# Name of the output file (eg. myMPI.oJobID)
 #$ -pe 12way 12	# Requests 12 tasks/node, 12 cores total
 #$ -q normal	# Queue name normal
-#$ -l h_rt=10:30:00	# Run time (hh:mm:ss) - 10.5 hours
+#$ -l h_rt=12:00:00	# Run time (hh:mm:ss) - 10.5 hours
 
-export MKL_NUM_THREADS=10
-export OMP_NUM_THREADS=10
+export MKL_NUM_THREADS=12
+export OMP_NUM_THREADS=12
 
 set -x	# Echo commands, use set echo with csh
 
@@ -24,9 +24,9 @@ export JY=0.0
 export JZ=1.0
 
 #Lattice size
-export LATSIZE=10
+export LATSIZE=14
 
-export RUNPROG="./isingrand_exact.py"
+export RUNPROG="./ising_exact.py"
 
 python $RUNPROG -l $LATSIZE -pbc -x $HX -y $HY -z $HZ -jx $JX -y $JY -z $JZ
 
