@@ -8,21 +8,25 @@
 #$ -q serial	# Queue name normal
 #$ -l h_rt=10:30:00	# Run time (hh:mm:ss) - 10.5 hours
 
+export OMP_NUM_THREADS=10
+
 set -x	# Echo commands, use set echo with csh
 
-#Transverse field range
-export TFIELD_INIT=10.0
-export TFIELD_FINAL=30.0
-export TFIELD_NOS=10.0
+#Transverse fields
+export HX=0.2
+export HY=0.0
+export HZ=0.0
+
+#Hopping terms
+export JX=0.0
+export JY=0.0
+export JZ=1.0
 
 #Lattice size
 export LATSIZE=10
 
-#Random number seed
-export SEED=3
-
 export RUNPROG="./isingrand_exact.py"
 
-$RUNPROG -l $LATSIZE 
+python $RUNPROG -l $LATSIZE -pbc -x $HX -y $HY -z $HZ -jx $JX -y $JY -z $JZ
 
 echo "End script run."

@@ -19,7 +19,7 @@ Default Parameters are entered here
 #Lattice size
 L = 6
 t_init = 0.0 # Initial time
-t_final = 5.0 # Final time
+t_final = 60.0 # Final time
 n_steps = 1000 # Number of time steps
 
 #Power law decay of interactions
@@ -333,15 +333,14 @@ def runising_dyn(params):
     # U^\dagger(t) A U(t). In the canonical basis, U(t) is just
     #\sum_n e^{i e_n t}|n><n| where e_n are the eigenvals!
     #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
-    E, U = np.linalg.eigh(lsize * sx)
-    initstate =  U[:,E.argsort()][-1]
+    initstate =  np.ones(2**lsize)/np.sqrt(2**lsize)
      
     dt = (t_final-t_init)/(n_steps-1.0)
     t_output = np.arange(t_init, t_final, dt)
     
-    sxdata = h.evolve(sx, t_output, initstate)/lsize
-    sydata = h.evolve(sy, t_output, initstate)/lsize
-    szdata = h.evolve(sz, t_output, initstate)/lsize
+    sxdata = h.evolve(sx, t_output, initstate)
+    sydata = h.evolve(sy, t_output, initstate)
+    szdata = h.evolve(sz, t_output, initstate)
     sxvar_data = h.evolve(sxvar, t_output, initstate)
     syvar_data = h.evolve(syvar, t_output, initstate)
     szvar_data = h.evolve(szvar, t_output, initstate)
