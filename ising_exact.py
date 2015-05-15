@@ -315,7 +315,7 @@ def runising_dyn(params):
     szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
     sxvar, syvar, szvar = \
-      (sxvar/lsq) + offset, (syvar/lsq + offset), (szvar/lsq) + offset
+      (sxvar/lsq) + offset, (syvar/lsq) + offset, (szvar/lsq) + offset
     
     sxyvar = np.sum(np.array(\
       [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
@@ -341,12 +341,24 @@ def runising_dyn(params):
     sxdata = h.evolve(sx, t_output, initstate)
     sydata = h.evolve(sy, t_output, initstate)
     szdata = h.evolve(sz, t_output, initstate)
+    
     sxvar_data = h.evolve(sxvar, t_output, initstate)
+    sxvar_data = sxvar_data - (sxdata)**2
+    
     syvar_data = h.evolve(syvar, t_output, initstate)
+    syvar_data = syvar_data - (sydata)**2
+    
     szvar_data = h.evolve(szvar, t_output, initstate)
+    szvar_data = szvar_data - (szdata)**2
+    
     sxyvar_data = h.evolve(sxyvar, t_output, initstate)
+    sxyvar_data = sxyvar_data - (sxdata) * (sydata)
+    
     sxzvar_data = h.evolve(sxzvar, t_output, initstate)
+    sxzvar_data = sxzvar_data - (sxdata) * (szdata)
+    
     syzvar_data = h.evolve(syzvar, t_output, initstate)
+    syzvar_data = syzvar_data - (sydata) * (szdata)
     
     data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
       np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
