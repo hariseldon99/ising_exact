@@ -250,8 +250,8 @@ class Hamiltonian:
       Z = sparse.csr_matrix(self.esys[1])
       list_of_time_obs_data = []
       for t in times:
-	Hdt = sparse.diags(np.exp( (1j) * self.esys[0] * t), 0, \
-	  format='csr')
+	Hdt = sparse.spdiags(np.exp( (1j) * self.esys[0] * t),0,\
+                self.esys[0].size,self.esys[0].size,format='csr')
 	obs_t = Z.T * Hdt * Z * obs * Z.T * Hdt.T.conjugate() * Z
         list_of_time_obs_data.append(np.vdot(\
 	  state, np.dot(obs_t.toarray(), state)))
