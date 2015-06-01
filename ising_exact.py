@@ -247,7 +247,8 @@ class Hamiltonian:
       for t in times:
 	Hdt = np.diagflat(\
 	  np.exp( (1j) * self.esys[0] * t )).view(np.matrix)
-	obs_tmat = Z.T * Hdt * Z * omat * Z.T * Hdt.T.conjugate() * Z
+	obs_tmat = Z * Hdt * Z.T * omat * Z * Hdt.T.conjugate() * Z.T
+	#obs_tmat = Z.T * Hdt * Z * omat * Z.T * Hdt.T.conjugate() * Z
 	obs_t = obs_tmat.view(np.ndarray)
         list_of_time_obs_data.append(np.vdot(state, np.dot(obs_t, state)))
       return np.array(list_of_time_obs_data)
