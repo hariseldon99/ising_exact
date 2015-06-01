@@ -14,7 +14,8 @@
 #########################################################################
 ##Number of nodes and procs per node.
 ##See docs at http://wiki.chpc.ac.za/howto:pbs-pro_job_submission_examples 
-#PBS -l select=1:ncpus=1:mpiprocs=1
+#U need 8 procs for the multithreaded BLAS
+#PBS -l select=1:ncpus=8:mpiprocs=8
 
 #########################################################################
 ##Send me email when my job aborts, begins, or ends
