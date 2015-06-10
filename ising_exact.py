@@ -8,10 +8,9 @@ Usage : ./ising_exact.py -h
 """
 import sys, argparse
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
 from pprint import pprint
 from itertools import combinations
+from scipy.integrate import odeint
 
 """
 Default Parameters are entered here
@@ -210,49 +209,42 @@ class Hamiltonian:
     #Copy arguments from params to this class
     self.__dict__.update(params.__dict__)
     #Build KE matrix
-    H = self.jx * np.sum(np.array(\
+    self.hamiltmat = self.jx * np.sum(np.array(\
       [self.jmat[sitepair] * self.kemats(sitepair)[0] \
 	for sitepair in combinations(xrange(self.lattice_size),2)]), axis=0)
-    H += self.jy * np.sum(np.array(\
+    self.hamiltmat += self.jy * np.sum(np.array(\
       [self.jmat[sitepair] * self.kemats(sitepair)[1] \
 	for sitepair in combinations(xrange(self.lattice_size),2)]), axis=0)
-    H += self.jz * np.sum(np.array(\
+    self.hamiltmat += self.jz * np.sum(np.array(\
       [self.jmat[sitepair] * self.kemats(sitepair)[2] \
 	for sitepair in combinations(xrange(self.lattice_size),2)]), axis=0)
-    H = H/self.norm
+    self.hamiltmat = self.hamiltmat/self.norm
     #Build transverse field matrix
-    H += self.hx * np.sum(np.array([self.nummats(mu)[0] \
+    self.hamiltmat += self.hx * np.sum(np.array([self.nummats(mu)[0] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    H += self.hy * np.sum(np.array([self.nummats(mu)[1] \
+    self.hamiltmat += self.hy * np.sum(np.array([self.nummats(mu)[1] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    H += self.hz * np.sum(np.array([self.nummats(mu)[2] \
+    self.hamiltmat += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    
-    try:
-	evals, U = np.linalg.eigh(-H)
-	idx = evals.argsort()
-	evals = evals[idx]
-	U = U[:,idx]
-	self.esys = (evals, U)
-    except np.linalg.linalg.LinAlgError:
-	self.esys = None
-	
-  def evolve(self, obs, times, state):
-    #Given the eigensystem of time-translation,
-    #build the translation and evolve an obs
-    if self.esys is not None:
-      Z = self.esys[1].view(np.matrix)
-      omat = obs.view(np.matrix)
-      list_of_time_obs_data = []
-      for t in times:
-	Hdt = np.diagflat(\
-	  np.exp( (1j) * self.esys[0] * t )).view(np.matrix)
-	obs_tmat = Z * Hdt * Z.T.conjugate() * omat * Z * Hdt.T.conjugate() * Z.T.conjugate()
-	obs_t = obs_tmat.view(np.ndarray)
-        list_of_time_obs_data.append(np.vdot(state, np.dot(obs_t, state)))
-      return np.array(list_of_time_obs_data)
-    else:
-      return None
+    self.hamiltmat = -self.hamiltmat
+
+def jac(y, t0, jacmat):
+  return jacmat
+
+def func(y, t0, jacmat):
+  return np.dot(jac(y, t0, jacmat), y)
+
+def evolve_numint(hamilt,times,initstate):
+  (rows,cols) = hamilt.hamiltmat.shape
+  fulljac = np.zeros((2*rows,2*cols))
+  fulljac[0:rows, 0:cols] = hamilt.hamiltmat.imag
+  fulljac[0:rows, cols:] = hamilt.hamiltmat.real
+  fulljac[rows:, 0:cols] = -hamilt.hamiltmat.real
+  fulljac[rows:, cols:] = hamilt.hamiltmat.imag
+  
+  psi_t = odeint(func, np.concatenate((initstate, np.zeros(rows))),\
+    times, args=(fulljac,), Dfun=jac)
+  return psi_t[:,0:rows] + (1j) * psi_t[:, rows:]
   
 class OutData:
   description = """Class to store output data"""
@@ -291,111 +283,90 @@ def runising_dyn(params):
     print "Starting run ..."
  
   h = Hamiltonian(params)  
+  lsize = h.lattice_size
+  lsq = lsize * lsize
   
-  if h.esys is not None:
-    
-    lsize = h.lattice_size
-    lsq = lsize * lsize
+  #Now, the expectation value of any observable A is just
+  # U^\dagger(t) A U(t). In the canonical basis, U(t) is just
+  #\sum_n e^{i e_n t}|n><n| where e_n are the eigenvals!
+  #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
+  initstate =  np.ones(2**lsize)/np.sqrt(2**lsize)
+  dt = (t_final-t_init)/(n_steps-1.0)
+  t_output = np.arange(t_init, t_final, dt)
+  
+  #Required observables
         
-    sx = np.sum(np.array([h.nummats(mu)[0] \
-      for mu in xrange(h.lattice_size)]), axis=0)
-    sy = np.sum(np.array([h.nummats(mu)[1] \
-      for mu in xrange(h.lattice_size)]), axis=0)
-    sz = np.sum(np.array([h.nummats(mu)[2] \
-      for mu in xrange(h.lattice_size)]), axis=0)
-    sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
-    
-    offset = np.eye(2**lsize, dtype=complex)
-    np.fill_diagonal(offset, (1/lsize))
-    
-    sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
-      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    syvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[1] \
-      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
-      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    sxvar, syvar, szvar = \
-      (sxvar/lsq) + offset, (syvar/lsq) + offset, (szvar/lsq) + offset
-    
-    sxyvar = np.sum(np.array(\
-      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
+  sx = np.sum(np.array([h.nummats(mu)[0] \
+    for mu in xrange(h.lattice_size)]), axis=0)
+  sy = np.sum(np.array([h.nummats(mu)[1] \
+    for mu in xrange(h.lattice_size)]), axis=0)
+  sz = np.sum(np.array([h.nummats(mu)[2] \
+    for mu in xrange(h.lattice_size)]), axis=0)
+  sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
+  
+  offset = np.eye(2**lsize, dtype=complex)
+  np.fill_diagonal(offset, (1/lsize))
+  
+  sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
 	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    sxzvar = np.sum(np.array(\
-      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[1] \
-	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    syzvar = np.sum(np.array(\
-      [h.jmat[sitepair] * h.offd_corrmats(sitepair)[2] \
-	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-    sxyvar, sxzvar, syzvar = \
-      (sxyvar/lsq) + offset, (sxzvar/lsq) + offset, (syzvar/lsq) + offset
-        
-    #Now, the expectation value of any observable A is just
-    # U^\dagger(t) A U(t). In the canonical basis, U(t) is just
-    #\sum_n e^{i e_n t}|n><n| where e_n are the eigenvals!
-    #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
-    initstate =  np.ones(2**lsize)/np.sqrt(2**lsize)
-     
-    dt = (t_final-t_init)/(n_steps-1.0)
-    t_output = np.arange(t_init, t_final, dt)
+  syvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[1] \
+    for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+  szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
+    for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+  sxvar, syvar, szvar = \
+    (sxvar/lsq) + offset, (syvar/lsq) + offset, (szvar/lsq) + offset
+  
+  sxyvar = np.sum(np.array(\
+    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+  sxzvar = np.sum(np.array(\
+    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[1] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+  syzvar = np.sum(np.array(\
+    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[2] \
+      for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
+  sxyvar, sxzvar, syzvar = \
+    (sxyvar/lsq) + offset, (sxzvar/lsq) + offset, (syzvar/lsq) + offset
+  
+  psi_t = evolve_numint(h, t_output, initstate)
+  sxdata = np.array([np.dot(psi,np.dot(sx,psi)) for psi in psi_t])
+  sydata = np.array([np.dot(psi,np.dot(sy,psi)) for psi in psi_t])
+  szdata = np.array([np.dot(psi,np.dot(sz,psi)) for psi in psi_t])
+  
+  sxvar_data = np.array([np.dot(psi,np.dot(sxvar,psi)) \
+    for psi in psi_t])
+  sxvar_data - sxvar_data - (sxdata)**2
+  
+  syvar_data = np.array([np.dot(psi,np.dot(syvar,psi)) \
+    for psi in psi_t])
+  syvar_data - syvar_data - (sydata)**2
+  
+  szvar_data = np.array([np.dot(psi,np.dot(szvar,psi)) \
+    for psi in psi_t])
+  szvar_data - szvar_data - (szdata)**2
+  
+  sxyvar_data = np.array([np.dot(psi,np.dot(sxyvar,psi)) \
+    for psi in psi_t])
+  sxyvar_data = sxyvar_data - (sxdata) * (sydata)
+  
+  sxzvar_data = np.array([np.dot(psi,np.dot(sxzvar,psi)) \
+    for psi in psi_t])
+  sxzvar_data = sxzvar_data - (sxdata) * (szdata)
+  
+  syzvar_data = np.array([np.dot(psi,np.dot(syzvar,psi)) \
+    for psi in psi_t])
+  syzvar_data = syzvar_data - (sydata) * (szdata)
     
-    sxdata = h.evolve(sx, t_output, initstate)
-    sydata = h.evolve(sy, t_output, initstate)
-    szdata = h.evolve(sz, t_output, initstate)
-    
-    sxvar_data = h.evolve(sxvar, t_output, initstate)
-    sxvar_data = sxvar_data - (sxdata)**2
-    
-    syvar_data = h.evolve(syvar, t_output, initstate)
-    syvar_data = syvar_data - (sydata)**2
-    
-    szvar_data = h.evolve(szvar, t_output, initstate)
-    szvar_data = szvar_data - (szdata)**2
-    
-    sxyvar_data = h.evolve(sxyvar, t_output, initstate)
-    sxyvar_data = sxyvar_data - (sxdata) * (sydata)
-    
-    sxzvar_data = h.evolve(sxzvar, t_output, initstate)
-    sxzvar_data = sxzvar_data - (sxdata) * (szdata)
-    
-    syzvar_data = h.evolve(syzvar, t_output, initstate)
-    syzvar_data = syzvar_data - (sydata) * (szdata)
-    
-    data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
-      np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
-    	np.abs(szvar_data), np.abs(sxyvar_data), \
-    	      np.abs(sxzvar_data), np.abs(syzvar_data), params)
-    
-    if params.verbose:
-      #Plot the eigenvalues and eigenvectors
-      lsize = params.lattice_size
-      limits = (-2**lsize/100,2**lsize)
-      plt.plot(h.esys[0].real)
-      plt.title('Eigenvalues - Sorted')
-      plt.matshow(np.abs(h.esys[1])**2,interpolation='nearest',\
-      cmap=cm.coolwarm)
-      plt.title('Eigenvectors - Sorted' ) 
-      plt.colorbar()
-      fig, ax = plt.subplots()
-      diag_cc = np.abs(h.esys[1].dot(initstate))**2
-      print diag_cc
-      plt.bar(np.arange(2**lsize), diag_cc, edgecolor='blue')                
-      plt.xlim(limits)
-      plt.xscale('log')
-      ax.xaxis.tick_top()
-      ax.set_xlabel('Lexicographical order of eigenstate')
-      ax.xaxis.set_label_position('top') 
-      ax.set_ylabel('Initial state probability wrt eigenstate')            
-      plt.show()
-      
-    print "\nDumping outputs to files ..."
-    data.dump_data()
-    print 'Done'
-    
-  else:
-    print "Error! Eigenvalues did not converge for these parameters,\
-    skipping ..."
+  data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
+    np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
+      np.abs(szvar_data), np.abs(sxyvar_data), \
+	    np.abs(sxzvar_data), np.abs(syzvar_data), params)
+
+  print "\nDumping outputs to files ..."
+  data.dump_data()
+  print 'Done'
 
 if __name__ == '__main__':
-    args_in = input()
-    paramdat = ParamData(args_in)
-    runising_dyn(paramdat)
+  args_in = input()
+  paramdat = ParamData(args_in)
+  runising_dyn(paramdat)
