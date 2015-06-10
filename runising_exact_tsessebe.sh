@@ -22,7 +22,6 @@
 #PBS -m ea
 #PBS -M daneel@sun.ac.za
 #########################################################################
-set -x  # Echo commands, use set echo with csh
 
 #Transverse fields
 export HX=0.2
@@ -35,7 +34,7 @@ export JY=0.0
 export JZ=1.0
 
 #Lattice size
-export LATSIZE=14
+export LATSIZE=11
 
 export RUNPROG="./ising_exact.py"
 
@@ -44,8 +43,8 @@ umask 0077
 # Load the module system
 source /etc/profile.d/modules.sh
 #Load relevant modules. Load them with THESE TWO LINES, NOT FROM ONE LINE
-module load dot intel 
-module load python/2.7.5
+module load dot intel
+module load gcc/4.9.1 Anaconda/2.1.0
 
 cd $PBS_O_WORKDIR
 
