@@ -74,7 +74,7 @@ def input():
     help="power law index for long range interactions", default=beta)
 
   parser.add_argument('-x', '--hx', type=np.float64, \
-    help="x transverse field", default=1.0)
+    help="x transverse field", default=0.0)
   parser.add_argument('-y', '--hy', type=np.float64, \
     help="y transverse field", default=0.0)
   parser.add_argument('-z', '--hz', type=np.float64, \
@@ -283,12 +283,10 @@ def runising_dyn(params):
     print "Starting run ..."
  
   h = Hamiltonian(params)  
+  pprint(h.hamiltmat)
   lsize = h.lattice_size
   lsq = lsize * lsize
   
-  #Now, the expectation value of any observable A is just
-  # U^\dagger(t) A U(t). In the canonical basis, U(t) is just
-  #\sum_n e^{i e_n t}|n><n| where e_n are the eigenvals!
   #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
   initstate =  np.ones(2**lsize)/np.sqrt(2**lsize)
   dt = (t_final-t_init)/(n_steps-1.0)
