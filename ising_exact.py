@@ -283,7 +283,6 @@ def runising_dyn(params):
     print "Starting run ..."
  
   h = Hamiltonian(params)  
-  pprint(h.hamiltmat)
   lsize = h.lattice_size
   lsq = lsize * lsize
   
