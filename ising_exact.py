@@ -11,6 +11,7 @@ import numpy as np
 from pprint import pprint
 from itertools import combinations
 from scipy.integrate import odeint
+from scipy.sparse import *
 
 """
 Default Parameters are entered here
@@ -18,7 +19,7 @@ Default Parameters are entered here
 #Lattice size
 L = 6
 t_init = 0.0 # Initial time
-t_final = 60.0 # Final time
+t_final = 4.0 # Final time
 n_steps = 1000 # Number of time steps
 
 #Power law decay of interactions
@@ -91,27 +92,29 @@ def input():
 #This is the Jmn hopping matrix with power law decay for open boundary
 #conditions.
 def get_jmat_obc(args):
-  lsize = args.lattice_size
-  #Set the diagonal bands of the matrix
-  J = np.sum(np.diagflat(np.ones(lsize-i)*pow(i, -args.beta), i) \
-    for i in xrange(1, lsize))
-  J = J+J.T
-  np.fill_diagonal(J, 0)
-  return J
+  N = args.lattice_size
+  J = dia_matrix((N, N))
+  for i in xrange(1,N):
+    elem = pow(i, -args.beta)
+    J.setdiag(elem, k=i)
+    J.setdiag(elem, k=-i)
+  return J.toarray()
 
 #This is the Jmn hopping matrix with power law decay for periodic boundary
 #conditions.
 def get_jmat_pbc(args):
-  lsize = args.lattice_size
-  mid_diag = np.floor(lsize/2).astype(int)
-  #Set the diagonal bands of the matrix
-  J = np.sum(np.diagflat(np.ones(lsize-i)*pow(i, -args.beta), i) \
-    for i in xrange(1, mid_diag+1))+\
-      np.sum(np.diagflat(np.ones(lsize-i)*pow(lsize-i, -args.beta), i)\
-	for i in xrange(mid_diag+1, lsize))
-  J = J + J.T
-  np.fill_diagonal(J, 0)
-  return J
+  N = args.lattice_size
+  J = dia_matrix((N, N))
+  mid_diag = np.floor(N/2).astype(int)
+  for i in xrange(1,mid_diag+1):
+    elem = pow(i, -args.beta)
+    J.setdiag(elem, k=i)
+    J.setdiag(elem, k=-i)
+  for i in xrange(mid_diag+1, N):
+    elem = pow(N-i, -args.beta)
+    J.setdiag(elem, k=i)
+    J.setdiag(elem, k=-i)
+  return J.toarray()  
 
 class ParamData:
   description = """Class to store parameters and hopping matrix"""
@@ -226,7 +229,7 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     self.hamiltmat += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    self.hamiltmat = -self.hamiltmat
+    #self.hamiltmat = -self.hamiltmat
 
 def jac(y, t0, jacmat):
   return jacmat
@@ -326,31 +329,32 @@ def runising_dyn(params):
     (sxyvar/lsq) + offset, (sxzvar/lsq) + offset, (syzvar/lsq) + offset
   
   psi_t = evolve_numint(h, t_output, initstate)
-  sxdata = np.array([np.dot(psi,np.dot(sx,psi)) for psi in psi_t])
-  sydata = np.array([np.dot(psi,np.dot(sy,psi)) for psi in psi_t])
-  szdata = np.array([np.dot(psi,np.dot(sz,psi)) for psi in psi_t])
+    
+  sxdata = np.array([np.vdot(psi,np.dot(sx,psi)) for psi in psi_t])
+  sydata = np.array([np.vdot(psi,np.dot(sy,psi)) for psi in psi_t])
+  szdata = np.array([np.vdot(psi,np.dot(sz,psi)) for psi in psi_t])
   
-  sxvar_data = np.array([np.dot(psi,np.dot(sxvar,psi)) \
+  sxvar_data = np.array([np.vdot(psi,np.dot(sxvar,psi)) \
     for psi in psi_t])
   sxvar_data - sxvar_data - (sxdata)**2
   
-  syvar_data = np.array([np.dot(psi,np.dot(syvar,psi)) \
+  syvar_data = np.array([np.vdot(psi,np.dot(syvar,psi)) \
     for psi in psi_t])
   syvar_data - syvar_data - (sydata)**2
   
-  szvar_data = np.array([np.dot(psi,np.dot(szvar,psi)) \
+  szvar_data = np.array([np.vdot(psi,np.dot(szvar,psi)) \
     for psi in psi_t])
   szvar_data - szvar_data - (szdata)**2
   
-  sxyvar_data = np.array([np.dot(psi,np.dot(sxyvar,psi)) \
+  sxyvar_data = np.array([np.vdot(psi,np.dot(sxyvar,psi)) \
     for psi in psi_t])
   sxyvar_data = sxyvar_data - (sxdata) * (sydata)
   
-  sxzvar_data = np.array([np.dot(psi,np.dot(sxzvar,psi)) \
+  sxzvar_data = np.array([np.vdot(psi,np.dot(sxzvar,psi)) \
     for psi in psi_t])
   sxzvar_data = sxzvar_data - (sxdata) * (szdata)
   
-  syzvar_data = np.array([np.dot(psi,np.dot(syzvar,psi)) \
+  syzvar_data = np.array([np.vdot(psi,np.dot(syzvar,psi)) \
     for psi in psi_t])
   syzvar_data = syzvar_data - (sydata) * (szdata)
     

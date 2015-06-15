@@ -1,8 +1,8 @@
 #!/bin/bash
 #########################################################################
 ## Name of my job
-#PBS -N ising_exact_13
-#PBS -l walltime=30:00:00
+#PBS -N ising_exact_11
+#PBS -l walltime=1:00:00
 #########################################################################
 ##Export all PBS environment variables
 #PBS -V
@@ -47,21 +47,21 @@ cd $TMP
 NO_OF_CORES=$(cat $PBS_NODEFILE | wc -l)
 #########################################################################
 ##Parameter ranges
-export BETA=1.0
-export HX=0.2
+export BETA=3.0
+export HX=0.0
 export HY=0.0
 export HZ=0.0
 export JX=0.0
 export JY=0.0
 export JZ=1.0
-export LATSIZE=13
+export LATSIZE=11
 
 
 #########################################################################
 ##Now run my prog
-module load python/2.7.6 dot
+module load dot
 BEGINTIME=$(date +"%s")
-python ./ising_exact.py -pbc -x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ -b $BETA -l $LATSIZE
+python ./ising_exact.py -pbc -v -n -x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ -b $BETA -l $LATSIZE
 ENDTIME=$(date +"%s")
 ELAPSED_TIME=$(($ENDTIME-$BEGINTIME))
 
