@@ -229,7 +229,7 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     self.hamiltmat += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
-    #self.hamiltmat = -self.hamiltmat
+    self.hamiltmat = -self.hamiltmat
 
 def jac(y, t0, jacmat):
   return jacmat
