@@ -335,15 +335,15 @@ def runising_dyn(params):
   
   sxvar_data = np.array([np.vdot(psi,np.dot(sxvar,psi)) \
     for psi in psi_t])
-  sxvar_data - sxvar_data - (sxdata)**2
+  sxvar_data = sxvar_data - (sxdata)**2
   
   syvar_data = np.array([np.vdot(psi,np.dot(syvar,psi)) \
     for psi in psi_t])
-  syvar_data - syvar_data - (sydata)**2
+  syvar_data = syvar_data - (sydata)**2
   
   szvar_data = np.array([np.vdot(psi,np.dot(szvar,psi)) \
     for psi in psi_t])
-  szvar_data - szvar_data - (szdata)**2
+  szvar_data = szvar_data - (szdata)**2
   
   sxyvar_data = np.array([np.vdot(psi,np.dot(sxyvar,psi)) \
     for psi in psi_t])
