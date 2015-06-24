@@ -304,7 +304,7 @@ def runising_dyn(params):
   sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
   
   offset = np.eye(2**lsize, dtype=complex)
-  np.fill_diagonal(offset, (1/lsize))
+  np.fill_diagonal(offset, (1./lsize))
   
   sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
 	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
