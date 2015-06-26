@@ -302,30 +302,26 @@ def runising_dyn(params):
   sz = np.sum(np.array([h.nummats(mu)[2] \
     for mu in xrange(h.lattice_size)]), axis=0)
   sx, sy, sz = sx/lsize, sy/lsize, sz/lsize
-  
-  offset = np.eye(2**lsize, dtype=complex)
-  np.fill_diagonal(offset, (1./lsize))
-  
-  sxvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[0] \
+    
+  sxvar = np.sum(np.array( [h.kemats(sitepair)[0] \
 	for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-  syvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[1] \
+
+  syvar = np.sum(np.array( [h.kemats(sitepair)[1] \
     for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-  szvar = np.sum(np.array( [h.jmat[sitepair] * h.kemats(sitepair)[2] \
+  szvar = np.sum(np.array( [h.kemats(sitepair)[2] \
     for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-  sxvar, syvar, szvar = \
-    (sxvar/lsq) + offset, (syvar/lsq) + offset, (szvar/lsq) + offset
+  sxvar, syvar, szvar = (sxvar/lsq), (syvar/lsq), (szvar/lsq)
   
   sxyvar = np.sum(np.array(\
-    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[0] \
+    [ h.offd_corrmats(sitepair)[0] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
   sxzvar = np.sum(np.array(\
-    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[1] \
+    [ h.offd_corrmats(sitepair)[1] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
   syzvar = np.sum(np.array(\
-    [h.jmat[sitepair] * h.offd_corrmats(sitepair)[2] \
+    [h.offd_corrmats(sitepair)[2] \
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
-  sxyvar, sxzvar, syzvar = \
-    (sxyvar/lsq) + offset, (sxzvar/lsq) + offset, (syzvar/lsq) + offset
+  sxyvar, sxzvar, syzvar = (sxyvar/lsq), (sxzvar/lsq), (syzvar/lsq)
   
   psi_t = evolve_numint(h, t_output, initstate)
     
@@ -335,27 +331,27 @@ def runising_dyn(params):
   
   sxvar_data = np.array([np.vdot(psi,np.dot(sxvar,psi)) \
     for psi in psi_t])
-  sxvar_data = sxvar_data - (sxdata)**2
+  sxvar_data = 2.0 * sxvar_data + (1./lsize) - (sxdata)**2 
   
   syvar_data = np.array([np.vdot(psi,np.dot(syvar,psi)) \
     for psi in psi_t])
-  syvar_data = syvar_data - (sydata)**2
+  syvar_data = 2.0 * syvar_data + (1./lsize) - (sydata)**2
   
   szvar_data = np.array([np.vdot(psi,np.dot(szvar,psi)) \
     for psi in psi_t])
-  szvar_data = szvar_data - (szdata)**2
+  szvar_data = 2.0 * szvar_data + (1./lsize) - (szdata)**2 
   
   sxyvar_data = np.array([np.vdot(psi,np.dot(sxyvar,psi)) \
     for psi in psi_t])
-  sxyvar_data = sxyvar_data - (sxdata) * (sydata)
+  sxyvar_data = 2.0 * sxyvar_data - (sxdata) * (sydata)
   
   sxzvar_data = np.array([np.vdot(psi,np.dot(sxzvar,psi)) \
     for psi in psi_t])
-  sxzvar_data = sxzvar_data - (sxdata) * (szdata)
+  sxzvar_data = 2.0 * sxzvar_data - (sxdata) * (szdata)
   
   syzvar_data = np.array([np.vdot(psi,np.dot(syzvar,psi)) \
     for psi in psi_t])
-  syzvar_data = syzvar_data - (sydata) * (szdata)
+  syzvar_data = 2.0 * syzvar_data - (sydata) * (szdata)
     
   data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
     np.abs(szdata), np.abs(sxvar_data), np.abs(syvar_data), \
