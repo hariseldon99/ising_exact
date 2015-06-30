@@ -325,10 +325,11 @@ def runising_dyn(params):
 
   #This handles shifting polarities. Subtract 1 from all 
   # expectation values to compensate
-  sx, sy, sz = sx + offset, sy + offset, sz + offset
-  sxvar, syvar, szvar = sxvar + offset, syvar + offset, szvar + offset 
+  unity = np.eye(2**lsize)
+  sx, sy, sz = sx + unity, sy + unity, sz + unity
+  sxvar, syvar, szvar = sxvar + unity, syvar + unity, szvar + unity 
   sxyvar, sxzvar, syzvar = \
-    sxyvar + offset, sxzvar + offset, syzvar + offset  
+    sxyvar + unity, sxzvar + unity, syzvar + unity  
 
   psi_t = evolve_numint(h, t_output, initstate)
     
