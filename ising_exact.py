@@ -229,6 +229,9 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     self.hamiltmat += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
+    
+    #This handles shifting polarities in response-time data
+    self.hamiltmat += np.eye(2**lsize)
 
 def jac(y, t0, jacmat):
   return jacmat
@@ -323,42 +326,34 @@ def runising_dyn(params):
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
   sxyvar, sxzvar, syzvar = (sxyvar/lsq), (sxzvar/lsq), (syzvar/lsq)
 
-  #This handles shifting polarities. Subtract 1 from all 
-  # expectation values to compensate
-  unity = np.eye(2**lsize)
-  sx, sy, sz = sx + unity, sy + unity, sz + unity
-  sxvar, syvar, szvar = sxvar + unity, syvar + unity, szvar + unity 
-  sxyvar, sxzvar, syzvar = \
-    sxyvar + unity, sxzvar + unity, syzvar + unity  
-
   psi_t = evolve_numint(h, t_output, initstate)
     
-  sxdata = np.array([np.vdot(psi,np.dot(sx,psi)) for psi in psi_t]) - 1.
-  sydata = np.array([np.vdot(psi,np.dot(sy,psi)) for psi in psi_t]) - 1.
-  szdata = np.array([np.vdot(psi,np.dot(sz,psi)) for psi in psi_t]) - 1.
+  sxdata = np.array([np.vdot(psi,np.dot(sx,psi)) for psi in psi_t]) 
+  sydata = np.array([np.vdot(psi,np.dot(sy,psi)) for psi in psi_t]) 
+  szdata = np.array([np.vdot(psi,np.dot(sz,psi)) for psi in psi_t]) 
   
   sxvar_data = np.array([np.vdot(psi,np.dot(sxvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t]) 
   sxvar_data = 2.0 * sxvar_data + (1./lsize) - (sxdata)**2 
   
   syvar_data = np.array([np.vdot(psi,np.dot(syvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t])
   syvar_data = 2.0 * syvar_data + (1./lsize) - (sydata)**2
   
   szvar_data = np.array([np.vdot(psi,np.dot(szvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t])
   szvar_data = 2.0 * szvar_data + (1./lsize) - (szdata)**2 
   
   sxyvar_data = np.array([np.vdot(psi,np.dot(sxyvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t])
   sxyvar_data = 2.0 * sxyvar_data - (sxdata) * (sydata)
   
   sxzvar_data = np.array([np.vdot(psi,np.dot(sxzvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t])
   sxzvar_data = 2.0 * sxzvar_data - (sxdata) * (szdata)
   
   syzvar_data = np.array([np.vdot(psi,np.dot(syzvar,psi)) \
-    for psi in psi_t]) - 1.
+    for psi in psi_t]) 
   syzvar_data = 2.0 * syzvar_data - (sydata) * (szdata)
     
   data = OutData(t_output, np.abs(sxdata), np.abs(sydata), \
