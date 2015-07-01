@@ -19,7 +19,7 @@ Default Parameters are entered here
 #Lattice size
 L = 6
 t_init = 0.0 # Initial time
-t_final = 4.0 # Final time
+t_final = 60.0 # Final time
 n_steps = 1000 # Number of time steps
 
 #Power law decay of interactions
@@ -230,9 +230,6 @@ class Hamiltonian:
     self.hamiltmat += self.hz * np.sum(np.array([self.nummats(mu)[2] \
       for mu in xrange(self.lattice_size)]), axis=0)
     
-    #This handles shifting polarities in response-time data
-    self.hamiltmat += np.eye(2**self.lattice_size)
-
 def jac(y, t0, jacmat):
   return jacmat
 
@@ -241,7 +238,7 @@ def func(y, t0, jacmat):
 
 def evolve_numint(hamilt,times,initstate):
   (rows,cols) = hamilt.hamiltmat.shape
-  fulljac = np.zeros((2*rows,2*cols))
+  fulljac = np.zeros((2*rows,2*cols), dtype="float64")
   fulljac[0:rows, 0:cols] = hamilt.hamiltmat.imag
   fulljac[0:rows, cols:] = hamilt.hamiltmat.real
   fulljac[rows:, 0:cols] = -hamilt.hamiltmat.real
@@ -249,7 +246,7 @@ def evolve_numint(hamilt,times,initstate):
   
   psi_t = odeint(func, np.concatenate((initstate, np.zeros(rows))),\
     times, args=(fulljac,), Dfun=jac)
-  return psi_t[:,0:rows] + (1j) * psi_t[:, rows:]
+  return psi_t[:,0:rows] + (1.j) * psi_t[:, rows:]
   
 class OutData:
   description = """Class to store output data"""
@@ -292,7 +289,7 @@ def runising_dyn(params):
   lsq = lsize * lsize
   
   #Assume that psi_0 is the eigenstate of \sum_\mu sigma^x_\mu
-  initstate =  np.ones(2**lsize)/np.sqrt(2**lsize)
+  initstate =  np.ones(2**lsize, dtype="float64")/np.sqrt(2**lsize)
   dt = (t_final-t_init)/(n_steps-1.0)
   t_output = np.arange(t_init, t_final, dt)
   
