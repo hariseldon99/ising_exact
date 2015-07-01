@@ -231,7 +231,7 @@ class Hamiltonian:
       for mu in xrange(self.lattice_size)]), axis=0)
     
     #This handles shifting polarities in response-time data
-    self.hamiltmat += np.eye(2**lsize)
+    self.hamiltmat += np.eye(2**self.lattice_size)
 
 def jac(y, t0, jacmat):
   return jacmat
