@@ -1,1 +1,0 @@
-./ising_exact.py -l 1 -b 1.0 -z 0.2 -y 0.0 -x 0.0 -jz 1.0 -jy 0.0 -jx 0.0 -n
