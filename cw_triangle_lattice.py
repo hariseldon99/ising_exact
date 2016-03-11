@@ -11,6 +11,8 @@ import numpy as np
 from pprint import pprint
 from itertools import combinations
 from scipy.integrate import odeint
+from numpy.linalg import norm
+
 """
 Default Parameters are entered here
 """
@@ -110,7 +112,7 @@ def get_jmat_obc(args):
           pj = points[j]
           d = norm(pi-pj)
           if i!=j:
-              J[i,j] = 1./pow(d,alpha)
+              J[i,j] = 1./pow(d,args.beta)
   return N, J            
 
 

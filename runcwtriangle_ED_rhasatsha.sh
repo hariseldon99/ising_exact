@@ -21,14 +21,15 @@
 NO_OF_CORES=$(cat $PBS_NODEFILE | wc -l)
 #########################################################################
 ##Parameter ranges
-export BETA=3.0
-export HX=0.0
+export BETA=0.7
+export HX=1.0
 export HY=0.0
 export HZ=0.0
 export JX=0.0
 export JY=0.0
-export JZ=1.0
+export JZ=-1.0
 export NROWS=3
+cd $PBS_O_WORKDIR
 
 #########################################################################
 ##Now run my prog
