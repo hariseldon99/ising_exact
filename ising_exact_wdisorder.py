@@ -93,14 +93,15 @@ def input():
 #This is the Jmn hopping matrix with power law decay for open boundary
 #conditions.
 def get_jmat_obc(args):
-  seed(s)  
-  N = args.lattice_size
-  J = dia_matrix((N, N))
-  for i in xrange(1,N):
-    elem = pow(i, -args.beta) * choice(random_choices)
-    J.setdiag(elem, k=i)
-    J.setdiag(elem, k=-i)
-  return J.toarray()
+  seed(s)
+  size = lattice_size
+  jmat = np.zeros((size, size))
+  for mu in xrange(size):
+      for nu in xrange(mu, size):
+          if mu != nu:
+              dmn = np.abs(mu-nu)
+              jmat[mu,nu] = choice(choices)/pow(dmn,args.beta)
+  return jmat+jmat.T
 
 
 class ParamData:
