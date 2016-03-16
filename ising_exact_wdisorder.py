@@ -20,8 +20,8 @@ Default Parameters are entered here
 #Lattice size
 L = 6
 t_init = 0.0 # Initial time
-t_final = 60.0 # Final time
-n_steps = 1000 # Number of time steps
+t_final = 1.3 # Final time
+n_steps = 500 # Number of time steps
 s = 9
 
 #Power law decay of interactions
@@ -94,7 +94,7 @@ def input():
 #conditions.
 def get_jmat_obc(args):
   seed(s)
-  size = lattice_size
+  size = args.lattice_size
   jmat = np.zeros((size, size))
   for mu in xrange(size):
       for nu in xrange(mu, size):
