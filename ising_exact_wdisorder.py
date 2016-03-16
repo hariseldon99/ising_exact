@@ -12,7 +12,7 @@ from pprint import pprint
 from itertools import combinations
 from scipy.integrate import odeint
 from scipy.sparse import *
-from random import choice
+from random import seed, choice
 
 """
 Default Parameters are entered here
@@ -22,6 +22,7 @@ L = 6
 t_init = 0.0 # Initial time
 t_final = 60.0 # Final time
 n_steps = 1000 # Number of time steps
+s = 9
 
 #Power law decay of interactions
 beta = 1.0
@@ -92,6 +93,7 @@ def input():
 #This is the Jmn hopping matrix with power law decay for open boundary
 #conditions.
 def get_jmat_obc(args):
+  seed(s)  
   N = args.lattice_size
   J = dia_matrix((N, N))
   for i in xrange(1,N):
