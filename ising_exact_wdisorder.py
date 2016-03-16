@@ -30,7 +30,7 @@ beta = 1.0
 desc = """Dynamics by exact diagonalization of 
 		1d Ising model with long range interactions"""
 
-random_choices = [-1,1]
+choices = [-1,1]
 
 #Pauli matrices
 sig_x, sig_y, sig_z = \
