@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 """
-Created on May  14 2015
+Created on May 14 2015
 
 @author: Analabha Roy (daneel@utexas.edu)
 
 Usage : ./ising_exact.py -h
 """
-import sys, argparse
+import argparse
 import numpy as np
 from pprint import pprint
-from itertools import combinations
+from itertools import combinations, product
 from scipy.integrate import odeint
 from scipy.sparse import *
 
@@ -17,10 +17,10 @@ from scipy.sparse import *
 Default Parameters are entered here
 """
 #Lattice size
-L = 6
+L = 6   
 t_init = 0.0 # Initial time
-t_final = 60.0 # Final time
-n_steps = 1000 # Number of time steps
+t_final = 1.0 # Final time
+n_steps = 100 # Number of time steps
 
 #Power law decay of interactions
 beta = 1.0
@@ -60,7 +60,9 @@ def input():
     help="sxz variance output file", default="sxzvar_outfile.txt")
   parser.add_argument('-oyz', '--output_syzvar',\
     help="sx variance output file", default="syzvar_outfile.txt")
-
+  parser.add_argument('-oszsz','--output_szsz',\
+    help="sz_3sz_(3+delta) output file", default="szsz_outfile.txt")
+    
   parser.add_argument("-v", '--verbose', action='store_true', \
     help="increase output verbosity")
 
@@ -250,11 +252,12 @@ def evolve_numint(hamilt,times,initstate):
   
 class OutData:
   description = """Class to store output data"""
-  def __init__(self, t, sx, sy, sz, sxx, syy, szz, sxy, sxz, syz, params):
+  def __init__(self, t, sx, sy, sz, sxx, syy, szz, sxy, sxz, syz, szsz ,params):
       self.t_output = t
       self.sx, self.sy, self.sz = sx, sy, sz
       self.sxvar, self.syvar, self.szvar = sxx, syy, szz
       self.sxyvar, self.sxzvar, self.syzvar = sxy, sxz, syz
+      self.szsz = szsz
       self.__dict__.update(params.__dict__)
 
   def dump_data(self):
@@ -276,7 +279,10 @@ class OutData:
 	np.vstack((self.t_output, self.sxzvar)).T, delimiter=' ')
       np.savetxt(self.output_syzvar, \
 	np.vstack((self.t_output, self.syzvar)).T, delimiter=' ')
-     
+      if self.szsz is not None:
+          np.savetxt(self.output_szsz, \
+              np.vstack((self.t_output, self.szsz.T)).T, delimiter=' ')
+
 def runising_dyn(params):
   if params.verbose:
     print "Executing diagonalization with parameters:"
@@ -352,10 +358,22 @@ def runising_dyn(params):
     for psi in psi_t]) 
   syzvar_data = 2.0 * syzvar_data - (sydata) * (szdata)
     
+  #Now, calculate <S^z_3 S^z_{3+delta}> w delta = (1,2,3,4,5)
+  if lsize>=9:
+      i = np.array([3])
+      j = i+np.arange(1,6)
+      szszdata = np.empty((t_output.size,j.size))
+      for count, sitepair in enumerate(product(i,j)):
+          obs = h.kemats(sitepair)[2]
+          szszdata[:,count] = np.array([np.vdot(psi,np.dot(obs,psi)) \
+                                      for psi in psi_t])
+  else:
+      szszdata = None
+     
   data = OutData(t_output,sxdata.real, sydata.real, \
     szdata.real, sxvar_data.real, syvar_data.real, \
       szvar_data.real, sxyvar_data.real, \
-	    sxzvar_data.real, syzvar_data.real, params)
+	    sxzvar_data.real, syzvar_data.real,szszdata, params)
 
   print "\nDumping outputs to files ..."
   data.dump_data()
