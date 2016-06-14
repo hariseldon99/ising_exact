@@ -4,7 +4,7 @@ Created on May 14 2015
 
 @author: Analabha Roy (daneel@utexas.edu)
 
-Usage : ./periodic_bosehubbard_exact -h
+Usage : ./bose_hubbard_exact -h
 """
 import argparse
 import numpy as np
