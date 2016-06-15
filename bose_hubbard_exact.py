@@ -4,24 +4,28 @@ Created on May 14 2015
 
 @author: Analabha Roy (daneel@utexas.edu)
 
-Usage : ./bose_hubbard_exact -h
 """
-import argparse
 import numpy as np
 from pprint import pprint
 from itertools import combinations, product
 from scipy.integrate import odeint
-from petsc4py import PETSc
-from slepc4py import SLEPc
+from math import factorial
+from mpi4py import MPI
+from scipy.sparse import csr_matrix, lil_matrix
 
 """
 Default Parameters are entered here
 """
 #Number of lattice sites
-M = 6   
+lattice_size = 3   
 #Number of particles
-N = 3
+particle_no = 3
 
+verbose = False
+
+#Drive parameters
+amp = 1.0
+freq = 0.0
 t_init = 0.0 # Initial time
 t_final = 1.0 # Final time
 n_steps = 100 # Number of time steps
@@ -29,114 +33,63 @@ n_steps = 100 # Number of time steps
 desc = """Dynamics by exact diagonalization of 
 		1d nearest neighbour bose hubbard model with periodic drive""" 
 
-def input():
-  parser = argparse.ArgumentParser(description=desc)
-  
-  parser.add_argument('-m', '--lattice_size', type=np.int64,\
-    help="size of the lattice", default=M)
-
-  parser.add_argument('-n', '--particle_no', type=np.int64,\
-    help="number of particles", default=N)
-    
-  
-  parser.add_argument('-or', '--output_r',\
-    help="response (density) output file", default="res_outfile.txt")
-  parser.add_argument('-ov', '--output_var',\
-    help="Number variance output file", default="var_outfile.txt")
-    
-  parser.add_argument("-v", '--verbose', action='store_true', \
-    help="increase output verbosity")
-
-  parser.add_argument('-pbc', '--periodic', \
-    help="switch to periodic boundary conditions, default is open",\
-      action="store_true")
-
-  parser.add_argument('-a', '--amp', type=np.float64, \
-    help="drive amplitude", default=1.0)
-  parser.add_argument('-w', '--freq', type=np.float64, \
-    help="drive frequency", default=0.0)
-  
-  return parser.parse_args()
  
-def jac(y, t0, jacmat):
-  return jacmat
+#def jac(y, t0, params):
+#  return jacmat
 
-def func(y, t0, jacmat):
-  return np.dot(jac(y, t0, jacmat), y)
+#def func(y, t0, params):
+#  return np.dot(params.jac, y)
 
-def hamiltonian(params):
-    # grid size and spacing
-    m, n  = 32, 32
-    hx = 1.0/(m-1)
-    hy = 1.0/(n-1)
-    
-    # create sparse matrix
-    A = PETSc.Mat()
-    A.create(PETSc.COMM_WORLD)
-    A.setSizes([m*n, m*n])
-    A.setType('aij') # sparse
-    A.setPreallocationNNZ(5)
-    
-    # precompute values for setting
-    # diagonal and non-diagonal entries
-    diagv = 2.0/hx**2 + 2.0/hy**2
-    offdx = -1.0/hx**2
-    offdy = -1.0/hy**2
-    
-    # loop over owned block of rows on this
-    # processor and insert entry values
-    Istart, Iend = A.getOwnershipRange()
-    for I in range(Istart, Iend) :
-        A[I,I] = diagv
-        i = I//n    # map row number to
-        j = I - i*n # grid coordinates
-        if i> 0  : J = I-n; A[I,J] = offdx
-        if i< m-1: J = I+n; A[I,J] = offdx
-        if j> 0  : J = I-1; A[I,J] = offdy
-        if j< n-1: J = I+1; A[I,J] = offdy
-    
-    # communicate off-processor values
-    # and setup internal data structures
-    # for performing parallel operations
-    A.assemblyBegin()
-    A.assemblyEnd()
-    return A
-
-
-def evolve_numint(hamilt,times,initstate):
-  (rows,cols) = hamilt.hamiltmat.shape
-  fulljac = np.zeros((2*rows,2*cols), dtype="float64")
-  fulljac[0:rows, 0:cols] = hamilt.hamiltmat.imag
-  fulljac[0:rows, cols:] = hamilt.hamiltmat.real
-  fulljac[rows:, 0:cols] = -hamilt.hamiltmat.real
-  fulljac[rows:, cols:] = hamilt.hamiltmat.imag
+#def evolve_numint(hamilt,times,initstate):
+#  (rows,cols) = hamilt.hamiltmat.shape
+#  fulljac = np.zeros((2*rows,2*cols), dtype="float64")
+#  fulljac[0:rows, 0:cols] = hamilt.hamiltmat.imag
+#  fulljac[0:rows, cols:] = hamilt.hamiltmat.real
+#  fulljac[rows:, 0:cols] = -hamilt.hamiltmat.real
+#  fulljac[rows:, cols:] = hamilt.hamiltmat.imag
   
-  psi_t = odeint(func, np.concatenate((initstate, np.zeros(rows))),\
-    times, args=(fulljac,), Dfun=jac)
-  return psi_t[:,0:rows] + (1.j) * psi_t[:, rows:]
+#  psi_t = odeint(func, np.concatenate((initstate, np.zeros(rows))),\
+#    times, args=(fulljac,), Dfun=jac)
+#  return psi_t[:,0:rows] + (1.j) * psi_t[:, rows:]
 
-def run_dyn(params):
-  if params.verbose:
-    print "Executing diagonalization with parameters:"
-    pprint(vars(params), depth=1)
-  else:
-    print "Starting run ..."
+def run_dyn():
+    comm = MPI.COMM_WORLD
+    if verbose:
+        print "Executing diagonalization with parameters:"
+        pprint(vars(params), depth=1)
+    else:
+        print "Starting run ..."
+    #Dimensionality of the hilbert space
+    m,n = lattice_size, particle_no    
+    d = factorial(n+m-1)/(factorial(n) * factorial(m-1))
+    
+    #Build the dxm-size fock state matrix as per ref. Do this SEQUENTIALLY
+    all_fockstates =  lil_matrix((d, m), dtype=np.float64)
+    #Set thefirst row to the highest fock state as per ref
+    all_fockstates[0,0] = n
+    for i in xrange(d):
+        if i != 0:
+            prev_fockstate = all_fockstates[i-1,:].toarray().flatten()
+            k = prev_fockstate.nonzero()[0][-1] 
+            all_fockstates[i,:k] = prev_fockstate[:k]
+            all_fockstates[i,k] = prev_fockstate[k] - 1.0
+            if k < m-1:
+                all_fockstates[i,k+1] = n - np.sum(all_fockstates[i,:k].toarray())
+    
+    all_fockstates = all_fockstates.tocsr()
+    pprint(all_fockstates.toarray())        
+    #Build kinetic energy matrix, i.e. \Sum_i (c_i^{\dagger}c_{i+1} + h.c.) 
+    #kemat = 
+    
  
-  h = hamiltonian(params)  
-  lsize = h.lattice_size
-  lsq = lsize * lsize
+    #initstate =  
+    #dt = (t_final-t_init)/(n_steps-1.0)
+    #t_output = np.arange(t_init, t_final, dt)
   
-  initstate =  
-  dt = (t_final-t_init)/(n_steps-1.0)
-  t_output = np.arange(t_init, t_final, dt)
+    #psi_t = evolve_numint(h, t_output, initstate)
   
-
-  psi_t = evolve_numint(h, t_output, initstate)
-  
-  print "\nDumping outputs to files ..."
-  data.dump_data()
-  print 'Done'
+    #print "\nDumping outputs to files ..."
+    #print 'Done'
 
 if __name__ == '__main__':
-  args_in = input()
-  run_dyn(args_in)
+  run_dyn()
