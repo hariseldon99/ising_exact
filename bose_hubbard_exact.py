@@ -16,9 +16,9 @@ from petsc4py import PETSc
 from scipy.sparse import lil_matrix, dia_matrix
 from bisect import bisect_left
 
-timesteps = 1000
-verbose = False
-
+timesteps = 100
+petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
+ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 #Verbosity function
 def verboseprint(verbosity, *args):
     if verbosity:
@@ -51,18 +51,23 @@ def boxings(n, k):
         else:
             return
 
-def jac(y, t, params):
+def drive(t, a, f):
     """
-    Synthesizes the Hamiltonian and returns it as a Jacobian
-    of the Schroedinger Equation
+    Time dependent drive on hopping amplitude J
     """
-    return (-1j) * (1.0 + params.amp * np.cos(params.freq*t)) *\
-                                                     params.h_ke + params.h_int
-def func(y, t, params):
+    return 1.0 + a * np.cos(f*t)
+
+def jac(y, t, p):
+    """
+    Synthesizes the Jacobian of the Schroedinger Equation
+    """
+    return drive(t, p.amp, p.freq) * p.jac_ke + p.jac_int
+    
+def func(y, t, p):
     """
     This is basically just Schroedinger's Equation
     """
-    return jac(y, t, params).dot(y)
+    return jac(y, t, p).dot(y)
 
 class ParamData:
     """Class that stores Hamiltonian matrices and 
@@ -101,6 +106,7 @@ class ParamData:
       self.comm = mpicomm
       self.verbose = verbose
       rank = self.comm.Get_rank()
+      size = self.comm.Get_size()
       n,m = self.particle_no, self.lattice_size    
       #Field disorder
       h = np.random.uniform(-1.0, 1.0, m)
@@ -110,11 +116,12 @@ class ParamData:
       alpha = self.disorder_strength
       tagweights = 100 * np.arange(m) + 3
       #Dimensionality of the hilbert space
-      self.dimension = factorial(n+m-1)/(factorial(n) * factorial(m-1))
+      self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
+      assert self.dimension >= size, "There are fewer rows than MPI procs!"
       d = self.dimension
       if rank == 0:
           #Build the dxm-size fock state matrix as per ref. 
-          all_fockstates =  lil_matrix((d, m), dtype=np.float64)
+          all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
           fockstate_tags = np.zeros(d)
           h_int_diag = np.zeros_like(fockstate_tags)
           for row_i, row in enumerate(boxings(n,m)):
@@ -122,33 +129,49 @@ class ParamData:
               row = np.array(row)
               fockstate_tags[row_i] = tagweights.dot(row)
               h_int_diag[row_i] = np.sum(row * (U * (row-1) - alpha * h))
-          all_fockstates = all_fockstates.tocsr()
           #Build the interaction matrix i.e U\sum_i n_i (n_i-1) -\alpha h_i n_i
-          self.h_int = dia_matrix((d, d), dtype=np.float64)
-          self.h_int.setdiag(h_int_diag)
+          data = np.array([np.concatenate((np.zeros(d), h_int_diag)),\
+                                   np.concatenate((-h_int_diag, np.zeros(d)))])
+          offsets = np.array([d,-d])                          
+          self.jac_int = dia_matrix((data,offsets), shape=(2*d, 2*d),\
+                                                              dtype=ode_dtype)
           #Sort the tags and store the original indices
           tag_inds = np.argsort(fockstate_tags)
           fockstate_tags = fockstate_tags[tag_inds]
-          #Build kinetic energy matrix, i.e. \sum_i (c_i^{\dagger}c_{i+1} + h.c.) 
-          self.h_ke =  lil_matrix((d, d), dtype=np.float64)
-          for v, fock_v in enumerate(boxings(n,m)):
-              fock_v = np.array(fock_v)
-              tag = tagweights.dot(fock_v)
-              #Search for this tag in the sorted array of tags
-              w = index(fockstate_tags, tag)
-              #Get the corresponding row index
-              u = tag_inds[w]
-              #This is -\sum_i \sqrt{(A_{vi}+1)A_{vi+1}} where A is the fockstate
-              #The "roll" implements periodic boundary conditions
-              elem = - np.sum(np.sqrt((fock_v + 1) * np.roll(fock_v,1)))
-              self.h_ke[u,v] = elem
-          self.h_ke = (self.h_ke+self.h_ke.T).tocsr()
+          #Build hop of kinetic energy matrix, i.e. \sum_i c_i^{\dagger}c_{i+1}  
+          h_ke =  lil_matrix((d, d), dtype=ode_dtype)
+          for site in xrange(m):  
+              next_site = 0 if site==m-1 else site+1 #Periodic bc
+              for v, fock_v in enumerate(boxings(n,m)):
+                  fock_v = np.array(fock_v)
+                  #Note that, if any site has no particles, then one annihilation
+                  #operator nullifies the whole state
+                  if fock_v[next_site] != 0:
+                      #Hop a particle in fock_v from i to i+1 & store.
+                      fockv_hopped = np.copy(fock_v)
+                      fockv_hopped[site] += 1
+                      fockv_hopped[next_site] -= 1
+                      #Tag this hopped vector
+                      tag = tagweights.dot(fockv_hopped)
+                      #Binary search for this tag in the sorted array of tags
+                      w = index(fockstate_tags, tag) 
+                      #Get the corresponding row index 
+                      u = tag_inds[w]
+                      #Add the hopping amplitude to the matrix element
+                      h_ke[u,v] -= np.sqrt((fock_v[site]+1) * fock_v[next_site])
+          h_ke = (h_ke + h_ke.T) # Add the hermitian conjugate
+          self.jac_ke = lil_matrix((2*d, 2*d), dtype=ode_dtype)
+          self.jac_ke[:d,d:] = h_ke
+          self.jac_ke[d:,:d] = -h_ke
+          self.jac_ke = self.jac_ke.tocsr()
       else:
           all_fockstates = None
-          self.h_int = None
-          self.h_ke = None
-      self.h_int = self.comm.tompi4py().bcast(self.h_int, root=0)    
-      self.h_ke  = self.comm.tompi4py().bcast(self.h_ke, root=0)
+          self.jac_int = None
+          self.jac_ke = None
+      self.jac_int = self.comm.tompi4py().bcast(self.jac_int, root=0)    
+      self.jac_ke  = self.comm.tompi4py().bcast(self.jac_ke, root=0)
+      if rank == 0:
+          verboseprint(self.verbose, vars(self))
 
 class FloquetMatrix:
     """Class that evaluates the Floquet Matrix of a time-periodically
@@ -161,10 +184,10 @@ class FloquetMatrix:
         d = params.dimension
         #Setup the Floquet Matrix in parallel
         self.fmat = PETSc.Mat()
-        self.fmat.create(params.comm)
-        locSize = PETSc.PETSC_DECIDE
-        self.fmat.setSizes(((locSize, d), (locSize, d)), bsize=1)
-        self.fmat.setType('dense')
+        self.fmat.create(comm=params.comm)
+        self.fmat.setSizes([d,d])
+        self.fmat.setType(PETSc.Mat.Type.DENSE)
+        self.fmat.setUp()
         #Initialize it to unity
         diag = self.fmat.getDiagonal()
         diag.set(1.0)
@@ -183,10 +206,16 @@ class FloquetMatrix:
         Istart, Iend = self.fmat.getOwnershipRange()
         for I in xrange(Istart, Iend):
             #Get the Ith row and evolve it
-            psi_t = odeint(func, self.fmat.getRow(I),\
-                                             times, args=(params,), Dfun=None)
-            #Set the Ith row to the final state after evolution                                 
-            self.fmat.setValuesLocal(I,np.arange(d),psi_t[-1])                                 
+            (inds, dat) = self.fmat.getRow(I)
+            #odeint does not handle complex numbers
+            psi_t = \
+                odeint(func,\
+                        np.concatenate((dat[inds].real, dat[inds].imag)),\
+                                              times, args=(params,), Dfun=None)
+            #Set the Ith row to the final state after evolution  
+                                                          
+            self.fmat.setValuesLocal(I,np.arange(d, dtype=petsc_int),\
+                                            psi_t[-1][:d] + (1j)*psi_t[-1][d:])                                 
         self.fmat.assemblyBegin()
         self.fmat.assemblyEnd()
 
