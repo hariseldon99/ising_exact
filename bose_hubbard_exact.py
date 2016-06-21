@@ -8,13 +8,14 @@ Created on June 13 2016
 from __future__ import division, print_function
 import numpy as np
 from pprint import pprint
+from math import factorial
 from itertools import chain
 from operator import sub
-from scipy.integrate import odeint
-from math import factorial
-from petsc4py import PETSc
-from scipy.sparse import lil_matrix, dia_matrix
 from bisect import bisect_left
+from scipy.sparse import lil_matrix, dia_matrix
+from scipy.integrate import odeint
+from petsc4py import PETSc
+from slepc4py import SLEPc
 
 timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
@@ -186,7 +187,7 @@ class FloquetMatrix:
         self.fmat = PETSc.Mat()
         self.fmat.create(comm=params.comm)
         self.fmat.setSizes([d,d])
-        self.fmat.setType(PETSc.Mat.Type.DENSE)
+        #self.fmat.setType(PETSc.Mat.Type.DENSE)
         self.fmat.setUp()
         #Initialize it to unity
         diag = self.fmat.getDiagonal()
@@ -219,12 +220,29 @@ class FloquetMatrix:
         self.fmat.assemblyBegin()
         self.fmat.assemblyEnd()
 
-    def diagonalize(self):
+    def diagonalize(self, params):
         """
         This diagonalizes the Floquet Matrix after evolution.
         NOTE: COMPLETE THIS
         """
-        pass
+        E = SLEPc.EPS() 
+        E.create()
+        E.setOperators(self.fmat)
+        E.setType(SLEPc.EPS.Type.LAPACK)
+        E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
+        E.solve()
+        nconv = E.getConverged()
+        assert nconv==params.dimension, "All the eigenvalues failed to converge"
+        if nconv > 0:
+            # Create the results vectors
+            vr, wr = self.fmat.getVecs()
+            vi, wi = self.fmat.getVecs()
+            for i in xrange(nconv):
+                eigenval = E.getEigenpair(i, vr, vi)
+                error = E.computeError(i)
+                #Assemble the eigenvals, errors into petsc vecs
+                #Assemble petsc vecs vr, vi into petsc mats
+                #Return the above in tuples WHILE STILL PARALLEL
     
 if __name__ == '__main__':
   p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
