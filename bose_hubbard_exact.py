@@ -193,8 +193,7 @@ class FloquetMatrix:
         diag = self.fmat.getDiagonal()
         diag.set(1.0)
         self.fmat.setDiagonal(diag)
-        self.fmat.assemblyBegin()
-        self.fmat.assemblyEnd()
+        self.fmat.assemble()
     
     def evolve(self, params):
         """
@@ -218,10 +217,9 @@ class FloquetMatrix:
                                                           
             self.fmat.setValuesLocal(I,np.arange(d, dtype=petsc_int),\
                                             psi_t[-1][:d] + (1j)*psi_t[-1][d:])                                 
-        self.fmat.assemblyBegin()
-        self.fmat.assemblyEnd()
+        self.fmat.assemble()
 
-    def diagonalize(self, params):
+    def get_evals(self, params):
         """
         This diagonalizes the Floquet Matrix after evolution.
         Interleave the square wave problem in this class
@@ -232,6 +230,7 @@ class FloquetMatrix:
         Use petsc matload for large matricespetsc-dumped to disk 
         NOTE: COMPLETE THIS
         """
+        rank = params.comm.Get_rank()            
         E = SLEPc.EPS() 
         E.create()
         E.setOperators(self.fmat)
@@ -240,16 +239,17 @@ class FloquetMatrix:
         E.solve()
         nconv = E.getConverged()
         assert nconv==params.dimension, "All the eigenvalues failed to converge"
-        if nconv > 0:
-            # Create the results vectors
-            vr, wr = self.fmat.getVecs()
-            vi, wi = self.fmat.getVecs()
-            for i in xrange(nconv):
-                eigenval = E.getEigenpair(i, vr, vi)
-                error = E.computeError(i)
-                #Assemble the eigenvals, errors into petsc vecs
-                #Assemble petsc vecs vr, vi into petsc mats
-                #Return the above in tuples WHILE STILL PARALLEL
+        if rank == 0:
+            evals = np.zeros(nconv)
+            evals_err = np.zeros(nconv)
+        else:
+            evals = None
+            evals_err = None
+        for i in xrange(nconv):
+            #eigensys = E.getEigenpair(i, vr, vi)
+            evals[i] = E.getEigenvalue(i)
+            evals_err[i] = E.computeError(i)
+        return (evals, evals_err)
     
 if __name__ == '__main__':
   p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
