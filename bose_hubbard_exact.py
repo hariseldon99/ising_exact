@@ -201,6 +201,7 @@ class FloquetMatrix:
         This evolves each column of the Floquet Matrix in time via the 
         periodically driven Bose Hubbard model. The Floquet Matrix 
         is updated after one time period
+        TODO: For large matrices, stream-dump to disk in parallel using petsc
         """
         d = params.dimension
         times = np.linspace(0.0, 2.0 * np.pi/params.freq, num=timesteps)
@@ -223,6 +224,12 @@ class FloquetMatrix:
     def diagonalize(self, params):
         """
         This diagonalizes the Floquet Matrix after evolution.
+        Interleave the square wave problem in this class
+        Pass BLAS env variables as a dictionary and set them here.
+        Also unset them to previous vals when you're done
+        Dense Floquet Matrices are being diagonalized without MPI using lapack
+        So you can use multithreaded BLAS here, set by env vars
+        Use petsc matload for large matricespetsc-dumped to disk 
         NOTE: COMPLETE THIS
         """
         E = SLEPc.EPS() 
