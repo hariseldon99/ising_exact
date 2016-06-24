@@ -20,6 +20,7 @@ from slepc4py import SLEPc
 timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
+
 #Verbosity function
 def verboseprint(verbosity, *args):
     if verbosity:
@@ -76,8 +77,8 @@ class ParamData:
        methods other than the constructor.
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
-                                 int_strength=1.0, disorder_strength=1.0,\
-                                      mpicomm=PETSc.COMM_WORLD, verbose=False):
+                                      int_strength=1.0, disorder_strength=1.0,\
+                                      mpicomm=PETSc.COMM_WORLD, verbose=False):                       
       """
        Usage:
        p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
@@ -106,8 +107,6 @@ class ParamData:
       self.disorder_strength = disorder_strength
       self.comm = mpicomm
       self.verbose = verbose
-      rank = self.comm.Get_rank()
-      size = self.comm.Get_size()
       n,m = self.particle_no, self.lattice_size    
       #Field disorder
       h = np.random.uniform(-1.0, 1.0, m)
@@ -115,11 +114,13 @@ class ParamData:
       U = self.int_strength
       #Disorder strength
       alpha = self.disorder_strength
-      tagweights = 100 * np.arange(m) + 3
       #Dimensionality of the hilbert space
       self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
+      size = self.comm.Get_size()      
       assert self.dimension >= size, "There are fewer rows than MPI procs!"
       d = self.dimension
+      rank = self.comm.Get_rank()
+      tagweights = 100 * np.arange(m) + 3
       if rank == 0:
           #Build the dxm-size fock state matrix as per ref. 
           all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
@@ -177,6 +178,14 @@ class ParamData:
 class FloquetMatrix:
     """Class that evaluates the Floquet Matrix of a time-periodically
        driven Bose Hubbard model
+       Usage:
+           HF = FloquetMatrix(p)
+       
+       Argument:
+           p = An object instance of the ParamData class.
+
+       Return value: 
+           An object that stores an initiated PETSc Floquet Matrix 
     """  
     def __init__(self, params):
         """
@@ -197,10 +206,16 @@ class FloquetMatrix:
     
     def evolve(self, params):
         """
-        This evolves each column of the Floquet Matrix in time via the 
+        This evolves each column of the Floquet Matrix  in time via the 
         periodically driven Bose Hubbard model. The Floquet Matrix 
         is updated after one time period
-        TODO: For large matrices, stream-dump to disk in parallel using petsc
+        Usage:
+            HF = FloquetMatrix(p)
+            HF.evolve(p)
+        Argument:
+           p = An object instance of the ParamData class.
+        Return value: 
+           None
         """
         d = params.dimension
         times = np.linspace(0.0, 2.0 * np.pi/params.freq, num=timesteps)
@@ -214,21 +229,29 @@ class FloquetMatrix:
                         np.concatenate((dat[inds].real, dat[inds].imag)),\
                                               times, args=(params,), Dfun=None)
             #Set the Ith row to the final state after evolution  
-                                                          
             self.fmat.setValuesLocal(I,np.arange(d, dtype=petsc_int),\
                                             psi_t[-1][:d] + (1j)*psi_t[-1][d:])                                 
         self.fmat.assemble()
 
     def get_evals(self, params):
         """
-        This diagonalizes the Floquet Matrix after evolution.
-        Interleave the square wave problem in this class
-        Pass BLAS env variables as a dictionary and set them here.
-        Also unset them to previous vals when you're done
+        This diagonalizes the Floquet Matrix after evolution. Outputs the
+        evals. It used PETSc/SLEPc to do this.
+        
         Dense Floquet Matrices are being diagonalized without MPI using lapack
         So you can use multithreaded BLAS here, set by env vars
-        Use petsc matload for large matricespetsc-dumped to disk 
-        NOTE: COMPLETE THIS
+        Note that PETSc might have separate blas library links than 
+        python/numpy.
+        
+        Usage:
+            HF = FloquetMatrix(p)
+            HF.evolve(p)
+        Argument:
+           p = An object instance of the ParamData class.
+        Return value: 
+           only root. tuple of array of eigenvalues and their errors
+        TODO:
+              Use petsc matload for large matrices that are petsc-dumped to disk 
         """
         rank = params.comm.Get_rank()            
         E = SLEPc.EPS() 
