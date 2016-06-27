@@ -99,6 +99,8 @@ class ParamData:
 
        Return value: 
        An object that stores all the parameters above. 
+       TODO:
+       Need to debug with testing for N=2,M=3. Not matching...
       """
       self.lattice_size = lattice_size
       self.particle_no = particle_no
