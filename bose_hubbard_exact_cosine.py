@@ -25,7 +25,7 @@ ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 def verboseprint(verbosity, *args):
     if verbosity:
         for arg in args:
-            pprint(arg)
+            pprint(arg, depth=2)
         print(" ")
 
 def index(a, x):
@@ -99,8 +99,6 @@ class ParamData:
 
        Return value: 
        An object that stores all the parameters above. 
-       TODO:
-       Need to debug with testing for N=2,M=3. Not matching...
       """
       self.lattice_size = lattice_size
       self.particle_no = particle_no
@@ -122,7 +120,7 @@ class ParamData:
       assert self.dimension >= size, "There are fewer rows than MPI procs!"
       d = self.dimension
       rank = self.comm.Get_rank()
-      tagweights = 100 * np.arange(m) + 3
+      tagweights = np.sqrt(100 * np.arange(m) + 3)
       if rank == 0:
           #Build the dxm-size fock state matrix as per ref. 
           all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
@@ -146,8 +144,8 @@ class ParamData:
           h_ke =  lil_matrix((d, d), dtype=ode_dtype)
           for site in xrange(m):  
               next_site = 0 if site==m-1 else site+1 #Periodic bc
-              for v, fock_v in enumerate(boxings(n,m)):
-                  fock_v = np.array(fock_v)
+              for v, fock_v in enumerate(all_fockstates):
+                  fock_v = fock_v.toarray().flatten()
                   #Note that, if any site has no particles, then one annihilation
                   #operator nullifies the whole state
                   if fock_v[next_site] != 0:
@@ -162,7 +160,7 @@ class ParamData:
                       #Get the corresponding row index 
                       u = tag_inds[w]
                       #Add the hopping amplitude to the matrix element
-                      h_ke[u,v] -= np.sqrt((fock_v[site]+1) * fock_v[next_site])
+                      h_ke[u,v] -= np.sqrt((fock_v[site]+1) * fock_v[next_site])          
           h_ke = (h_ke + h_ke.T) # Add the hermitian conjugate
           self.jac_ke = lil_matrix((2*d, 2*d), dtype=ode_dtype)
           self.jac_ke[:d,d:] = h_ke
@@ -198,8 +196,9 @@ class FloquetMatrix:
         self.fmat = PETSc.Mat()
         self.fmat.create(comm=params.comm)
         self.fmat.setSizes([d,d])
-        #self.fmat.setType(PETSc.Mat.Type.DENSE)
+        self.fmat.setType(PETSc.Mat.Type.DENSE)
         self.fmat.setUp()
+        self.fmat.assemble()
         #Initialize it to unity
         diag = self.fmat.getDiagonal()
         diag.set(1.0)
@@ -218,6 +217,8 @@ class FloquetMatrix:
            p = An object instance of the ParamData class.
         Return value: 
            None
+        TODO:
+         petsc crashes. Need to debug basic petsc mat executions, then petsc4py
         """
         d = params.dimension
         times = np.linspace(0.0, 2.0 * np.pi/params.freq, num=timesteps)
