@@ -1,20 +1,49 @@
 #!/usr/bin/env python
-"""
-Created on June 13 2016
+from __future__ import division, print_function
 
+__docstring__ = """
+Created on June 13 2016
 @author: Analabha Roy (daneel@utexas.edu)
 
+Schroedinger dynamics of the Bose Hubbard model with periodic drive (cosine):
+    1. Floquet Matrix formulation and diagonalization
+    2. Numerical time-evolution of initial condition 
+
+To be run as as an imported module.
+
+Usage:
+    >>> import sys
+    #Edit the path below to where you have kept the bose hubbard python module
+    >>> bhpath = '/home/daneel/gitrepos/ising_exact'
+    >>> sys.path.append(bhpath)
+    >>> import bose_hubbard_exact_cosine as bh
+    >>> from petsc4py import PETSc
+    >>> Print = PETSc.Sys.Print
+    >>> Print("These are the system parameters:")
+    >>> p = bh.ParamData(lattice_size=3, particle_no=2, amp=0.1,\\
+         freq=1.0, int_strength=1.0, disorder_strength=0.0, verbose=True)
+    >>> Print("Hilbert Space Dimension = ",p.dimension)
+    >>> Print("Initializing Floquet Matrix as unity:")
+    >>> Hf = bh.FloquetMatrix(p)
+    >>> Hf.fmat.view()
+    >>> Print("Evolving the Floquet Matrix by one time period:")
+    >>> Hf.evolve(p)
+    >>> Print("New Floquet Matrix is:")
+    >>> Hf.fmat.view()
 """
-from __future__ import division, print_function
+
 import numpy as np
-from pprint import pprint
 from math import factorial
+
 from itertools import chain
 from operator import sub
+
 from bisect import bisect_left
 from scipy.sparse import lil_matrix, dia_matrix
 from scipy.integrate import odeint
+
 from petsc4py import PETSc
+Print = PETSc.Sys.Print
 from slepc4py import SLEPc
 
 timesteps = 100
@@ -25,8 +54,8 @@ ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 def verboseprint(verbosity, *args):
     if verbosity:
         for arg in args:
-            pprint(arg, depth=2)
-        print(" ")
+            Print(arg)
+        Print(" ")
 
 def index(a, x):
     """
@@ -193,8 +222,7 @@ class FloquetMatrix:
         """
         d = params.dimension
         #Setup the Floquet Matrix in parallel
-        self.fmat = PETSc.Mat()
-        self.fmat.create(comm=params.comm)
+        self.fmat = PETSc.Mat().create(comm=params.comm)
         self.fmat.setSizes([d,d])
         self.fmat.setType(PETSc.Mat.Type.DENSE)
         self.fmat.setUp()
@@ -217,23 +245,22 @@ class FloquetMatrix:
            p = An object instance of the ParamData class.
         Return value: 
            None
-        TODO:
-         petsc crashes. Need to debug basic petsc mat executions, then petsc4py
         """
         d = params.dimension
         times = np.linspace(0.0, 2.0 * np.pi/params.freq, num=timesteps)
-        Istart, Iend = self.fmat.getOwnershipRange()
-        for I in xrange(Istart, Iend):
+        rstart, rend = self.fmat.getOwnershipRange()
+        for i in xrange(rstart, rend):
             #Get the Ith row and evolve it
-            (inds, dat) = self.fmat.getRow(I)
+            (inds, dat) = self.fmat.getRow(i)
             #odeint does not handle complex numbers
             psi_t = \
                 odeint(func,\
                         np.concatenate((dat[inds].real, dat[inds].imag)),\
-                                              times, args=(params,), Dfun=None)
-            #Set the Ith row to the final state after evolution  
-            self.fmat.setValuesLocal(I,np.arange(d, dtype=petsc_int),\
-                                            psi_t[-1][:d] + (1j)*psi_t[-1][d:])                                 
+                                              times, args=(params,), Dfun=None)         
+            #Set the Ith row to the final state after evolution
+            #TODO: SOMEHOW, THIS IS WRONG. CRASHES HERE. DEBUG                                  
+            self.fmat.setValuesLocal(i,np.arange(d, dtype=petsc_int),\
+                                            psi_t[-1][:d] + (1j)*psi_t[-1][d:])
         self.fmat.assemble()
 
     def get_evals(self, params):
@@ -278,5 +305,4 @@ class FloquetMatrix:
         return (evals, evals_err)
     
 if __name__ == '__main__':
-  p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
-            int_strength=1.0, disorder_strength=1.0)
+    Print(__docstring__)
