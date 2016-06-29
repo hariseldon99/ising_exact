@@ -258,9 +258,8 @@ class FloquetMatrix:
                         np.concatenate((dat[inds].real, dat[inds].imag)),\
                                               times, args=(params,), Dfun=None)         
             #Set the Ith row to the final state after evolution
-            #TODO: SOMEHOW, THIS IS WRONG. CRASHES HERE. DEBUG                                  
-            self.fmat.setValuesLocal(i,np.arange(d, dtype=petsc_int),\
-                                            psi_t[-1][:d] + (1j)*psi_t[-1][d:])
+            #TODO: CHECK THIS
+            self.fmat.setValues([i],range(d), psi_t[-1][:d] + (1j)*psi_t[-1][d:])
         self.fmat.assemble()
 
     def get_evals(self, params):
