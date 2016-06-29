@@ -12,8 +12,9 @@ Schroedinger dynamics of the Bose Hubbard model with periodic drive (cosine):
 To be run as as an imported module.
 
 Usage:
+    >>> import numpy as np
     >>> import sys
-    #Edit the path below to where you have kept the bose hubbard python module
+    >>> #Edit the path below to where you have kept the bose hubbard python module
     >>> bhpath = '/home/daneel/gitrepos/ising_exact'
     >>> sys.path.append(bhpath)
     >>> import bose_hubbard_exact_cosine as bh
@@ -21,7 +22,7 @@ Usage:
     >>> Print = PETSc.Sys.Print
     >>> Print("These are the system parameters:")
     >>> p = bh.ParamData(lattice_size=3, particle_no=2, amp=0.1,\\
-         freq=1.0, int_strength=1.0, disorder_strength=0.0, verbose=True)
+    >>>     freq=1.0, int_strength=1.0, disorder_strength=0.0, verbose=True)
     >>> Print("Hilbert Space Dimension = ",p.dimension)
     >>> Print("Initializing Floquet Matrix as unity:")
     >>> Hf = bh.FloquetMatrix(p)
@@ -30,6 +31,15 @@ Usage:
     >>> Hf.evolve(p)
     >>> Print("New Floquet Matrix is:")
     >>> Hf.fmat.view()
+    >>> Print("Diagonalizing the Floquet matrix. Eigenvalues:")
+    >>> ev, err = Hf.get_evals(p)
+    >>> Print(ev)
+    >>> Print("Modulii of eigenvalues:")
+    >>> Print(np.abs(ev))
+
+Note: 
+    To get the above usage in a python script, just re-execute (in bash shell)
+    and grep the python shell prompts
 """
 
 import numpy as np
@@ -49,6 +59,7 @@ from slepc4py import SLEPc
 timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
+slepc_complex = np.complex128
 
 #Verbosity function
 def verboseprint(verbosity, *args):
@@ -251,16 +262,15 @@ class FloquetMatrix:
         rstart, rend = self.fmat.getOwnershipRange()
         for i in xrange(rstart, rend):
             #Get the Ith row and evolve it
-            (inds, dat) = self.fmat.getRow(i)
+            init = self.fmat[i,:]
             #odeint does not handle complex numbers
             psi_t = \
                 odeint(func,\
-                        np.concatenate((dat[inds].real, dat[inds].imag)),\
+                        np.concatenate((init.real, init.imag)),\
                                               times, args=(params,), Dfun=None)         
             #Set the Ith row to the final state after evolution
-            #TODO: CHECK THIS
-            self.fmat.setValues([i],range(d), psi_t[-1][:d] + (1j)*psi_t[-1][d:])
-        self.fmat.assemble()
+            self.fmat[i,:] = psi_t[-1][:d] + (1j)*psi_t[-1][d:]                                              
+            self.fmat.assemble()
 
     def get_evals(self, params):
         """
@@ -280,9 +290,11 @@ class FloquetMatrix:
         Return value: 
            only root. tuple of array of eigenvalues and their errors
         TODO:
-              Use petsc matload for large matrices that are petsc-dumped to disk 
-        """
-        rank = params.comm.Get_rank()            
+              1. Use petsc matload for large matrices that are petsc-dumped to disk
+              2. Separate method to return both evals & evecs 
+                 or optionally dump them to bin file
+                 see routine in 'eth_diag.c' to see the logic for doing this
+        """        
         E = SLEPc.EPS() 
         E.create()
         E.setOperators(self.fmat)
@@ -291,12 +303,8 @@ class FloquetMatrix:
         E.solve()
         nconv = E.getConverged()
         assert nconv==params.dimension, "All the eigenvalues failed to converge"
-        if rank == 0:
-            evals = np.zeros(nconv)
-            evals_err = np.zeros(nconv)
-        else:
-            evals = None
-            evals_err = None
+        evals = np.zeros(nconv, dtype=slepc_complex)
+        evals_err = np.zeros(nconv)
         for i in xrange(nconv):
             #eigensys = E.getEigenpair(i, vr, vi)
             evals[i] = E.getEigenvalue(i)
