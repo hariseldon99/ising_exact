@@ -41,7 +41,7 @@ Note:
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
 """
-import os, tempfile
+import os, tempfile as tmpf
 import numpy as np
 from math import factorial
 
@@ -305,37 +305,41 @@ class FloquetMatrix:
                             matrices to temp file therein instead of in memory.
         Return value: 
             Tuple consisting of eigenvalues (array) and PETSc matrix of eigenvectors
-        TODO:
-              1. Use petsc matload for large matrices that are petsc-dumped to disk
-              2. Add code to return both evals & evecs with evecs in parallel 
+        Note:    
+        The Floquet Matrix is created as row ordered, but since
+        they are defined by column, this routine transposes it before 
+        diagonalizing
+        
+        THINGS TO DO:
+              TODO. Please test the note above to make sure that the evec matrix 
+                  is the inverse of the original evec matrix
+              TODO. Add code to return both evals & evecs with evecs in parallel 
                  see routine in 'eth_diag.c' to see the logic for doing this
         """        
         rank = params.comm.Get_rank()    
         #Cache a large Floquet Matrix to disk
         if cachedir == None :
             cache = False
-            cachefile = None
+            cfile = None
         else:
             cache = True
             assert type(cachedir) == str, "Please enter a valid path to cachedir"
             assert os.path.exists(cachedir),  "Please enter a valid path to cachedir"
             #Only root should create the file and broadcast to all proce
-            cachefile = tempfile.NamedTemporaryFile(dir=cachedir) if rank == 0 else None
-            fname = cachefile.name if rank == 0 else None
-            params.comm.tompi4py().bcast(fname, root=0)
+            cfile = tmpf.NamedTemporaryFile(dir=cachedir) if rank == 0 else None
+            fname = cfile.name if rank == 0 else None
+            fname = params.comm.tompi4py().bcast(fname, root=0)
             #Now, initialize a PETSc viewer for this file, write and re-read
-            #TODO: This does not work in parallel. Ask in petsc forum
+            #TODO: This does not work with parallel dense format. Ask in petsc forum
             viewer = PETSc.Viewer().createBinary(fname, 'w')
             viewer.pushFormat(viewer.Format.NATIVE)
             viewer.view(self.fmat)
-            viewer = PETSc.Viewer().createBinary(fname, 'r')
+            viewer = PETSc.Viewer().createBinary(fname, 'r')    
             self.fmat = PETSc.Mat().load(viewer)
-        #Use SLEPc to diagonalize the matrix    
+
+        #Initiate the SLEPc solver to diagonalize the matrix    
         E = SLEPc.EPS() 
         E.create()
-        #Floquet Matrix was created as row ordered, but should be transpose
-        #TODO: Please test this to make sure that the evec matrix is the
-        #inverse of the original evec matrix
         E.setOperators(PETSc.Mat().createTranspose(self.fmat))
         E.setType(SLEPc.EPS.Type.LAPACK)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
@@ -353,7 +357,7 @@ class FloquetMatrix:
         #Synchronize and have root close the cache file, if caching is done         
         params.comm.tompi4py().barrier()        
         if cache and rank == 0:
-            cachefile.close()            
+            cfile.close()            
         return (evals, evals_err)
         
 if __name__ == '__main__':
