@@ -29,10 +29,10 @@ Usage:
     >>> Hf.fmat.view()
     >>> Print("Evolving the Floquet Matrix by one time period:")
     >>> Hf.evolve(p)
-    >>> Print("New Floquet Matrix is:")
+    >>> Print("New Floquet Matrix is the transpose of the below matrix:")
     >>> Hf.fmat.view()
-    >>> Print("Diagonalizing the Floquet matrix. Eigenvalues:")
-    >>> ev, err = Hf.get_evals(p)
+    >>> Print("Transposing and diagonalizing the Floquet matrix. Eigenvalues:")
+    >>> ev, err = Hf.tr_get_evals(p)
     >>> Print(ev)
     >>> Print("Modulii of eigenvalues:")
     >>> Print(np.abs(ev))
@@ -41,7 +41,7 @@ Note:
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
 """
-
+import os, tempfile
 import numpy as np
 from math import factorial
 
@@ -60,6 +60,7 @@ timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
+fname = 'matrix-cache.dat' #Name of cached file for storing Floquet Matrix in disk
 
 #Verbosity function
 def verboseprint(verbosity, *args):
@@ -214,6 +215,7 @@ class ParamData:
       self.jac_ke  = self.comm.tompi4py().bcast(self.jac_ke, root=0)
       if rank == 0:
           verboseprint(self.verbose, vars(self))
+      return None    
 
 class FloquetMatrix:
     """Class that evaluates the Floquet Matrix of a time-periodically
@@ -243,12 +245,15 @@ class FloquetMatrix:
         diag.set(1.0)
         self.fmat.setDiagonal(diag)
         self.fmat.assemble()
+        return None
     
     def evolve(self, params):
         """
-        This evolves each column of the Floquet Matrix  in time via the 
+        This evolves each ROW of the Floquet Matrix  in time via the 
         periodically driven Bose Hubbard model. The Floquet Matrix 
-        is updated after one time period
+        is updated after one time period. To get the actual Floquet Matrix
+        (which is supposed to be column ordered), always use PETSc to transpose
+        it.
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
@@ -260,19 +265,24 @@ class FloquetMatrix:
         d = params.dimension
         times = np.linspace(0.0, 2.0 * np.pi/params.freq, num=timesteps)
         rstart, rend = self.fmat.getOwnershipRange()
-        for i in xrange(rstart, rend):
+        #Storage for locally evaluated final state
+        local_data = np.zeros((rend-rstart,d), dtype=slepc_complex)
+        for loc_i, i in enumerate(xrange(rstart, rend)):
             #Get the Ith row and evolve it
             init = self.fmat[i,:]
-            #odeint does not handle complex numbers
+            #Evolve to final state. Note:odeint does not handle complex numbers
             psi_t = \
                 odeint(func,\
                         np.concatenate((init.real, init.imag)),\
                                               times, args=(params,), Dfun=None)         
-            #Set the Ith row to the final state after evolution
-            self.fmat[i,:] = psi_t[-1][:d] + (1j)*psi_t[-1][d:]                                              
-            self.fmat.assemble()
-
-    def get_evals(self, params):
+            #Store the final state after evolution
+            local_data[loc_i,:] = psi_t[-1][:d] + (1j)*psi_t[-1][d:]
+        #Write the stored final states to the corresponding rows of fmat
+        self.fmat[rstart:rend,:] = local_data
+        self.fmat.assemble()
+        return None
+            
+    def tr_get_evals(self, params, get_evecs=False, cachedir=None):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
         evals. It used PETSc/SLEPc to do this.
@@ -285,31 +295,66 @@ class FloquetMatrix:
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
-        Argument:
-           p = An object instance of the ParamData class.
+            HF.get_evals(p, disk_cache=True)
+        Arguments:
+            p            = An object instance of the ParamData class.
+            get_evecs    = Boolean (optional, default False). Set to true
+                            for getting the eigenvector matrix (row wise)
+            cachedir     = Directory path as a string (optional, default None). 
+                            If provided, then it is used to cache large Floquet 
+                            matrices to temp file therein instead of in memory.
         Return value: 
-           only root. tuple of array of eigenvalues and their errors
+            Tuple consisting of eigenvalues (array) and PETSc matrix of eigenvectors
         TODO:
               1. Use petsc matload for large matrices that are petsc-dumped to disk
-              2. Separate method to return both evals & evecs 
-                 or optionally dump them to bin file
+              2. Add code to return both evals & evecs with evecs in parallel 
                  see routine in 'eth_diag.c' to see the logic for doing this
         """        
+        rank = params.comm.Get_rank()    
+        #Cache a large Floquet Matrix to disk
+        if cachedir == None :
+            cache = False
+            cachefile = None
+        else:
+            cache = True
+            assert type(cachedir) == str, "Please enter a valid path to cachedir"
+            assert os.path.exists(cachedir),  "Please enter a valid path to cachedir"
+            #Only root should create the file and broadcast to all proce
+            cachefile = tempfile.NamedTemporaryFile(dir=cachedir) if rank == 0 else None
+            fname = cachefile.name if rank == 0 else None
+            params.comm.tompi4py().bcast(fname, root=0)
+            #Now, initialize a PETSc viewer for this file, write and re-read
+            #TODO: This does not work in parallel. Ask in petsc forum
+            viewer = PETSc.Viewer().createBinary(fname, 'w')
+            viewer.pushFormat(viewer.Format.NATIVE)
+            viewer.view(self.fmat)
+            viewer = PETSc.Viewer().createBinary(fname, 'r')
+            self.fmat = PETSc.Mat().load(viewer)
+        #Use SLEPc to diagonalize the matrix    
         E = SLEPc.EPS() 
         E.create()
-        E.setOperators(self.fmat)
+        #Floquet Matrix was created as row ordered, but should be transpose
+        #TODO: Please test this to make sure that the evec matrix is the
+        #inverse of the original evec matrix
+        E.setOperators(PETSc.Mat().createTranspose(self.fmat))
         E.setType(SLEPc.EPS.Type.LAPACK)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         E.solve()
-        nconv = E.getConverged()
+        nconv = E.getConverged() #Number of converged eigenvalues
         assert nconv==params.dimension, "All the eigenvalues failed to converge"
-        evals = np.zeros(nconv, dtype=slepc_complex)
-        evals_err = np.zeros(nconv)
+        evals = np.empty(nconv, dtype=slepc_complex)
+        evals_err = np.empty(nconv)
+        if get_evecs:
+            vr, wr = self.fmat.getVecs()
+            vi, wi = self.fmat.getVecs()
         for i in xrange(nconv):
-            #eigensys = E.getEigenpair(i, vr, vi)
-            evals[i] = E.getEigenvalue(i)
-            evals_err[i] = E.computeError(i)
+            evals[i] = E.getEigenpair(i, vr, vi) if get_evecs else E.getEigenvalue(i)
+            evals_err[i] =  E.computeError(i)
+        #Synchronize and have root close the cache file, if caching is done         
+        params.comm.tompi4py().barrier()        
+        if cache and rank == 0:
+            cachefile.close()            
         return (evals, evals_err)
-    
+        
 if __name__ == '__main__':
     Print(__docstring__)
