@@ -304,17 +304,16 @@ class FloquetMatrix:
                             If provided, then it is used to cache large Floquet 
                             matrices to temp file therein instead of in memory.
         Return value: 
-            Tuple consisting of eigenvalues (array) and PETSc matrix of eigenvectors
+            Tuple consisting of eigenvalues (array) and their errors
+            Eigenvector matrix is stored in PETSc parallel ROWWISE as HF.evecs
         Note:    
         The Floquet Matrix is created as row ordered, but since
         they are defined by column, this routine transposes it before 
-        diagonalizing
+        diagonalizing. The eigenvectors are kept rowwise
         
         THINGS TO DO:
               TODO. Please test the note above to make sure that the evec matrix 
                   is the inverse of the original evec matrix
-              TODO. Add code to return both evals & evecs with evecs in parallel 
-                 see routine in 'eth_diag.c' to see the logic for doing this
         """        
         rank = params.comm.Get_rank()    
         #Cache a large Floquet Matrix to disk
@@ -349,11 +348,24 @@ class FloquetMatrix:
         evals = np.empty(nconv, dtype=slepc_complex)
         evals_err = np.empty(nconv)
         if get_evecs:
+            self.evecs = self.fmat.duplicate()
             vr, wr = self.fmat.getVecs()
             vi, wi = self.fmat.getVecs()
         for i in xrange(nconv):
             evals[i] = E.getEigenpair(i, vr, vi) if get_evecs else E.getEigenvalue(i)
             evals_err[i] =  E.computeError(i)
+            if get_evecs:
+                #Complexify the eigenvector by vr = (1j)* vi + vr
+                vr.axpy(1j,vi)
+                #Get the local block of eigenvector data & their global indices 
+                #Then  insert into evecs matrix
+                locfirst, loclast = vr.getOwnershipRange()
+                loc_idx = range(locfirst, loclast)
+                dataloc = vr.getArray()
+                #Set the real parts
+                self.evecs.setValues([i],loc_idx,dataloc)
+        if get_evecs:
+            self.evecs.assemble()
         #Synchronize and have root close the cache file, if caching is done         
         params.comm.tompi4py().barrier()        
         if cache and rank == 0:
