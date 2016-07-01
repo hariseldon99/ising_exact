@@ -248,9 +248,7 @@ class FloquetMatrix:
         """
         This evolves each ROW of the Floquet Matrix  in time via the 
         periodically driven Bose Hubbard model. The Floquet Matrix 
-        is updated after one time period. To get the actual Floquet Matrix
-        (which is supposed to be column ordered), always use PETSc to transpose
-        it.
+        is updated after one time period.
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
@@ -303,13 +301,6 @@ class FloquetMatrix:
             Tuple consisting of eigenvalues (array) and their errors both as
             PETSc vectors. If evaluated, the eigenvector matrix is stored as 
             PETSc Mat ROWWISE in "HF.evecs"
-        Note:    
-        The Floquet Matrix is created as row ordered, but since
-        they are defined by column, this routine transposes it before 
-        diagonalizing. The eigenvectors are kept rowwise
-        
-        TODO: Please test the note above to make sure that the evec matrix 
-        is the inverse of the original evec matrix
         """     
         #Initiate the SLEPc solver to diagonalize the matrix    
         E = SLEPc.EPS() 
@@ -336,7 +327,7 @@ class FloquetMatrix:
             fmat_loc = self.fmat.duplicate()
             fmat_loc.load(viewer)
         #Finish setting up the eigensolver and execute it
-        E.setOperators(PETSc.Mat().createTranspose(fmat_loc))
+        E.setOperators(fmat_loc)
         E.setType(SLEPc.EPS.Type.LAPACK)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         E.solve()
