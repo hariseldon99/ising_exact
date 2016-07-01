@@ -91,8 +91,8 @@ def boxings(n, k):
             if x:
                 seq[:i+1] = [x-1] * (i+1)
                 break
-            else:
-                return
+        else:
+            return
 
 def drive(t, a, f):
     """
