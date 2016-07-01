@@ -5,9 +5,8 @@ __docstring__ = """
 Created on June 13 2016
 @author: Analabha Roy (daneel@utexas.edu)
 
-Schroedinger dynamics of the Bose Hubbard model with periodic drive (cosine):
-    1. Floquet Matrix formulation and diagonalization
-    2. Numerical time-evolution of initial condition 
+Floquet Matrix formulation and diagonalization of the Bose Hubbard model with 
+periodic drive (cosine):
 
 To be run as as an imported module.
 
@@ -15,7 +14,7 @@ Usage:
     >>> import numpy as np
     >>> import sys
     >>> #Edit the path below to where you have kept the bose hubbard python module
-    >>> bhpath = '/home/daneel/gitrepos/ising_exact'
+    >>> bhpath = '/path/to/bose_hubbard/module'
     >>> sys.path.append(bhpath)
     >>> import bose_hubbard_exact_cosine as bh
     >>> from petsc4py import PETSc
@@ -33,9 +32,11 @@ Usage:
     >>> Hf.fmat.view()
     >>> Print("Transposing and diagonalizing the Floquet matrix. Eigenvalues:")
     >>> ev, err = Hf.tr_get_evals(p)
-    >>> Print(ev)
+    >>> ev.view()
     >>> Print("Modulii of eigenvalues:")
-    >>> Print(np.abs(ev))
+    >>> mods = ev.copy()
+    >>> mods.sqrtabs()
+    >>> mods.view()
 
 Note: 
     To get the above usage in a python script, just re-execute (in bash shell)
@@ -60,7 +61,6 @@ timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
-fname = 'matrix-cache.dat' #Name of cached file for storing Floquet Matrix in disk
 
 #Verbosity function
 def verboseprint(verbosity, *args):
@@ -91,8 +91,8 @@ def boxings(n, k):
             if x:
                 seq[:i+1] = [x-1] * (i+1)
                 break
-        else:
-            return
+            else:
+                return
 
 def drive(t, a, f):
     """
@@ -113,9 +113,8 @@ def func(y, t, p):
     return jac(y, t, p).dot(y)
 
 class ParamData:
-    """Class that stores Hamiltonian matrices and 
-       and system parameters. This class has no 
-       methods other than the constructor.
+    """Class that stores Hamiltonian matrices and and system parameters. 
+       This class has no methods other than the constructor.
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
                                       int_strength=1.0, disorder_strength=1.0,\
@@ -215,7 +214,6 @@ class ParamData:
       self.jac_ke  = self.comm.tompi4py().bcast(self.jac_ke, root=0)
       if rank == 0:
           verboseprint(self.verbose, vars(self))
-      return None    
 
 class FloquetMatrix:
     """Class that evaluates the Floquet Matrix of a time-periodically
@@ -245,7 +243,6 @@ class FloquetMatrix:
         diag.set(1.0)
         self.fmat.setDiagonal(diag)
         self.fmat.assemble()
-        return None
     
     def evolve(self, params):
         """
@@ -280,7 +277,6 @@ class FloquetMatrix:
         #Write the stored final states to the corresponding rows of fmat
         self.fmat[rstart:rend,:] = local_data
         self.fmat.assemble()
-        return None
             
     def tr_get_evals(self, params, get_evecs=False, cachedir=None):
         """
@@ -295,31 +291,35 @@ class FloquetMatrix:
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
-            HF.get_evals(p, disk_cache=True)
+            HF.tr_get_evals(p, disk_cache=True)
         Arguments:
             p            = An object instance of the ParamData class.
             get_evecs    = Boolean (optional, default False). Set to true
                             for getting the eigenvector matrix (row wise)
             cachedir     = Directory path as a string (optional, default None). 
                             If provided, then it is used to cache large Floquet 
-                            matrices to temp file therein instead of in memory.
+                            matrices to temp file in there instead of memory.
         Return value: 
-            Tuple consisting of eigenvalues (array) and their errors
-            Eigenvector matrix is stored in PETSc parallel ROWWISE as HF.evecs
+            Tuple consisting of eigenvalues (array) and their errors both as
+            PETSc vectors. If evaluated, the eigenvector matrix is stored as 
+            PETSc Mat ROWWISE in "HF.evecs"
         Note:    
         The Floquet Matrix is created as row ordered, but since
         they are defined by column, this routine transposes it before 
         diagonalizing. The eigenvectors are kept rowwise
         
-        THINGS TO DO:
-              TODO. Please test the note above to make sure that the evec matrix 
-                  is the inverse of the original evec matrix
-        """        
+        TODO: Please test the note above to make sure that the evec matrix 
+        is the inverse of the original evec matrix
+        """     
+        #Initiate the SLEPc solver to diagonalize the matrix    
+        E = SLEPc.EPS() 
+        E.create()
+        #Now, cache large Floquet matrix to disk before passing it to the solver
         rank = params.comm.Get_rank()    
-        #Cache a large Floquet Matrix to disk
         if cachedir == None :
             cache = False
             cfile = None
+            fmat_loc = self.fmat
         else:
             cache = True
             assert type(cachedir) == str, "Please enter a valid path to cachedir"
@@ -329,41 +329,41 @@ class FloquetMatrix:
             fname = cfile.name if rank == 0 else None
             fname = params.comm.tompi4py().bcast(fname, root=0)
             #Now, initialize a PETSc viewer for this file, write and re-read
-            #TODO: This does not work with parallel dense format. Ask in petsc forum
             viewer = PETSc.Viewer().createBinary(fname, 'w')
             viewer.pushFormat(viewer.Format.NATIVE)
             viewer.view(self.fmat)
             viewer = PETSc.Viewer().createBinary(fname, 'r')    
-            self.fmat = PETSc.Mat().load(viewer)
-
-        #Initiate the SLEPc solver to diagonalize the matrix    
-        E = SLEPc.EPS() 
-        E.create()
-        E.setOperators(PETSc.Mat().createTranspose(self.fmat))
+            fmat_loc = self.fmat.duplicate()
+            fmat_loc.load(viewer)
+        #Finish setting up the eigensolver and execute it
+        E.setOperators(PETSc.Mat().createTranspose(fmat_loc))
         E.setType(SLEPc.EPS.Type.LAPACK)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         E.solve()
         nconv = E.getConverged() #Number of converged eigenvalues
-        assert nconv==params.dimension, "All the eigenvalues failed to converge"
-        evals = np.empty(nconv, dtype=slepc_complex)
-        evals_err = np.empty(nconv)
+        assert nconv == params.dimension, "All the eigenvalues failed to converge"
+        evals, er = fmat_loc.getVecs()
+        evals_err, eer = fmat_loc.getVecs()
         if get_evecs:
-            self.evecs = self.fmat.duplicate()
-            vr, wr = self.fmat.getVecs()
-            vi, wi = self.fmat.getVecs()
+            self.evecs = fmat_loc.duplicate()
+            vr, wr = fmat_loc.getVecs()
+            vi, wi = fmat_loc.getVecs()
         for i in xrange(nconv):
-            evals[i] = E.getEigenpair(i, vr, vi) if get_evecs else E.getEigenvalue(i)
-            evals_err[i] =  E.computeError(i)
+            ev = E.getEigenpair(i, vr, vi) if get_evecs else E.getEigenvalue(i)
+            ev_err =  E.computeError(i)
+            evals.setValue(i,ev)
+            evals_err.setValue(i,ev_err)
             if get_evecs:
                 #Complexify the eigenvector by vr = (1j)* vi + vr
                 vr.axpy(1j,vi)
-                #Get the local block of eigenvector data & their global indices 
-                #Then  insert into evecs matrix
+                #Insert into evecs the local block of eigenvector data
                 locfirst, loclast = vr.getOwnershipRange()
                 loc_idx = range(locfirst, loclast)
                 dataloc = vr.getArray()
                 #Set the real parts
                 self.evecs.setValues([i],loc_idx,dataloc)
+        evals.assemble()
+        evals_err.assemble()
         if get_evecs:
             self.evecs.assemble()
         #Synchronize and have root close the cache file, if caching is done         
