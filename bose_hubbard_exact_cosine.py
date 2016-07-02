@@ -248,7 +248,7 @@ class FloquetMatrix:
         """
         This evolves each ROW of the Floquet Matrix  in time via the 
         periodically driven Bose Hubbard model. The Floquet Matrix 
-        is updated after one time period.
+        is updated after one time period and finally TRANSPOSED.
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
@@ -275,6 +275,7 @@ class FloquetMatrix:
         #Write the stored final states to the corresponding rows of fmat
         self.fmat[rstart:rend,:] = local_data
         self.fmat.assemble()
+        self.fmat.transpose() #For column ordering
             
     def tr_get_evals(self, params, get_evecs=False, cachedir=None):
         """
@@ -300,7 +301,7 @@ class FloquetMatrix:
         Return value: 
             Tuple consisting of eigenvalues (array) and their errors both as
             PETSc vectors. If evaluated, the eigenvector matrix is stored as 
-            PETSc Mat ROWWISE in "HF.evecs"
+            PETSc Mat COLUMN WISE in "HF.evecs"
         """     
         #Initiate the SLEPc solver to diagonalize the matrix    
         E = SLEPc.EPS() 
@@ -357,6 +358,7 @@ class FloquetMatrix:
         evals_err.assemble()
         if get_evecs:
             self.evecs.assemble()
+            self.evecs.transpose() #For column ordering
         #Synchronize and have root close the cache file, if caching is done         
         params.comm.tompi4py().barrier()        
         if cache and rank == 0:
