@@ -26,7 +26,7 @@ n_steps = 100 # Number of time steps
 beta = 1.0
 
 desc = """Dynamics by exact diagonalization of 
-		1d Ising model with long range interactions"""
+		1d generalized Curie-Weiss model with long range interactions"""
 
 #Pauli matrices
 sig_x, sig_y, sig_z = \

@@ -25,8 +25,8 @@ n_steps = 1000 # Number of time steps
 #Power law decay of interactions
 beta = 1.0
 
-desc = """Dynamics by exact diagonalization of 
-		2d triangle lattice model with long range interactions"""
+desc = """Dynamics by exact diagonalization of the generalized Curie-Weiss
+                model in a 2d triangle lattice with long range interactions"""
 
 #Pauli matrices
 sig_x, sig_y, sig_z = \
