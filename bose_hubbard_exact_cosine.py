@@ -21,7 +21,7 @@ Usage:
     >>> Print = PETSc.Sys.Print
     >>> Print("These are the system parameters:")
     >>> p = bh.ParamData(lattice_size=3, particle_no=2, amp=0.1,\\
-    >>>     freq=1.0, int_strength=1.0, disorder_strength=0.0, verbose=True)
+    >>>                               freq=1.0, int_strength=1.0, verbose=True)
     >>> Print("Hilbert Space Dimension = ",p.dimension)
     >>> Print("Initializing Floquet Matrix as unity:")
     >>> Hf = bh.FloquetMatrix(p)
@@ -117,7 +117,7 @@ class ParamData:
        This class has no methods other than the constructor.
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
-                                      int_strength=1.0, disorder_strength=1.0,\
+                                      int_strength=1.0, field=None,\
                                       mpicomm=PETSc.COMM_WORLD, verbose=False):                       
       """
        Usage:
@@ -133,7 +133,8 @@ class ParamData:
        freq   	 =  The periodic (cosine) drive frequency. Defaults to 1.
        int_strength  =  The interaction strength U of the Bose Hubbard model.
                         Defaults to 1.
-       disorder_strength =  Amplitude of the site disorder. Defaults to 1.
+       field         =  Optional numpy array of spatially varying field. 
+                           Defaults to None.
        mpicomm           =  MPI Communicator. Defaults to PETSc.COMM_WORLD
        verbose           =  Boolean for verbose output. Defaults to False
 
@@ -144,22 +145,24 @@ class ParamData:
       self.particle_no = particle_no
       self.amp, self.freq = amp, freq
       self.int_strength = int_strength
-      self.disorder_strength = disorder_strength
       self.comm = mpicomm
       self.verbose = verbose
-      n,m = self.particle_no, self.lattice_size    
-      #Field disorder
-      h = np.random.uniform(-1.0, 1.0, m)
+      n,m = self.particle_no, self.lattice_size  
+      rank = self.comm.Get_rank()
+      if field is not None:
+          assert type(field).__module__ == np.__name__, "Field needs a numpy array"
+          assert field.size >= lattice_size, "Field array too small"
+          h = field.flatten() if rank == 0 else None
+          h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root 
+      else:
+          h = 0.0
       #Interaction
       U = self.int_strength
-      #Disorder strength
-      alpha = self.disorder_strength
       #Dimensionality of the hilbert space
       self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
       size = self.comm.Get_size()      
       assert self.dimension >= size, "There are fewer rows than MPI procs!"
       d = self.dimension
-      rank = self.comm.Get_rank()
       tagweights = np.sqrt(100 * np.arange(m) + 3)
       if rank == 0:
           #Build the dxm-size fock state matrix as per ref. 
@@ -170,7 +173,7 @@ class ParamData:
               all_fockstates[row_i,:] = row
               row = np.array(row)
               fockstate_tags[row_i] = tagweights.dot(row)
-              h_int_diag[row_i] = np.sum(row * (U * (row-1) - alpha * h))
+              h_int_diag[row_i] = np.sum(row * (U * (row-1) - h))
           #Build the interaction matrix i.e U\sum_i n_i (n_i-1) -\alpha h_i n_i
           data = np.array([np.concatenate((np.zeros(d), h_int_diag)),\
                                    np.concatenate((-h_int_diag, np.zeros(d)))])
