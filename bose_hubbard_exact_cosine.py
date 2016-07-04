@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 from __future__ import division, print_function
-
-__docstring__ = """
+__doc__ = """
 Created on June 13 2016
 @author: Analabha Roy (daneel@utexas.edu)
 
@@ -31,7 +30,7 @@ Usage:
     >>> Print("New Floquet Matrix is the transpose of the below matrix:")
     >>> Hf.fmat.view()
     >>> Print("Transposing and diagonalizing the Floquet matrix. Eigenvalues:")
-    >>> ev, err = Hf.tr_get_evals(p)
+    >>> ev, err = Hf.eigensys(p)
     >>> ev.view()
     >>> Print("Modulii of eigenvalues:")
     >>> mods = ev.copy()
@@ -41,6 +40,8 @@ Usage:
 Note: 
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
+Reference:
+    J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.
 """
 import os, tempfile as tmpf
 import numpy as np
@@ -62,8 +63,10 @@ petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
 
-#Verbosity function
 def verboseprint(verbosity, *args):
+    """
+    print args if verbose mode is enabled
+    """
     if verbosity:
         for arg in args:
             Print(arg)
@@ -127,16 +130,16 @@ class ParamData:
        All parameters (arguments) are optional.
        
        Parameters:
-       lattice_size   	=  The size of your lattice as an integer.
-       particle_no     =  The number of particles (bosons) in the lattice 
-       amp             =  The periodic (cosine) drive amplitude. Defaults to 1.
-       freq   	 =  The periodic (cosine) drive frequency. Defaults to 1.
-       int_strength  =  The interaction strength U of the Bose Hubbard model.
-                        Defaults to 1.
-       field         =  Optional numpy array of spatially varying field. 
-                           Defaults to None.
-       mpicomm           =  MPI Communicator. Defaults to PETSc.COMM_WORLD
-       verbose           =  Boolean for verbose output. Defaults to False
+       lattice_size = The size of your lattice as an integer.
+       particle_no  = The number of particles (bosons) in the lattice 
+       amp          = The periodic (cosine) drive amplitude. Defaults to 1.
+       freq   	    = The periodic (cosine) drive frequency. Defaults to 1.
+       int_strength = The interaction strength U of the Bose Hubbard model.
+                       Defaults to 1.
+       field        = Optional numpy array of spatially varying field. 
+                       Defaults to None.
+       mpicomm      = MPI Communicator. Defaults to PETSc.COMM_WORLD
+       verbose      = Boolean for verbose output. Defaults to False
 
        Return value: 
        An object that stores all the parameters above. 
@@ -165,7 +168,7 @@ class ParamData:
       d = self.dimension
       tagweights = np.sqrt(100 * np.arange(m) + 3)
       if rank == 0:
-          #Build the dxm-size fock state matrix as per ref. 
+          #Build the dxm-size fock state matrix as per ref in docstring
           all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
           fockstate_tags = np.zeros(d)
           h_int_diag = np.zeros_like(fockstate_tags)
@@ -219,20 +222,21 @@ class ParamData:
           verboseprint(self.verbose, vars(self))
 
 class FloquetMatrix:
-    """Class that evaluates the Floquet Matrix of a time-periodically
-       driven Bose Hubbard model
-       Usage:
-           HF = FloquetMatrix(p)
-       
-       Argument:
-           p = An object instance of the ParamData class.
-
-       Return value: 
-           An object that stores an initiated PETSc Floquet Matrix 
-    """  
+     
     def __init__(self, params):
         """
-        This creates a distributed parallel dense unit matrix
+        Class that evaluates the Floquet Matrix of a time-periodically
+        driven Bose Hubbard model
+        Usage:
+            HF = FloquetMatrix(p)
+           
+        Argument:
+            p = An object instance of the ParamData class.
+    
+        Return value: 
+            An object that stores an initiated PETSc Floquet Matrix 
+        
+        The constructor creates a distributed parallel dense unit matrix
         """
         d = params.dimension
         #Setup the Floquet Matrix in parallel
@@ -280,7 +284,7 @@ class FloquetMatrix:
         self.fmat.assemble()
         self.fmat.transpose() #For column ordering
             
-    def tr_get_evals(self, params, get_evecs=False, cachedir=None):
+    def eigensys(self, params, get_evecs=False, cachedir=None):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
         evals. It used PETSc/SLEPc to do this.
@@ -293,7 +297,7 @@ class FloquetMatrix:
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
-            HF.tr_get_evals(p, disk_cache=True)
+            HF.eigensys(p, disk_cache=True)
         Arguments:
             p            = An object instance of the ParamData class.
             get_evecs    = Boolean (optional, default False). Set to true
@@ -369,4 +373,4 @@ class FloquetMatrix:
         return (evals, evals_err)
         
 if __name__ == '__main__':
-    Print(__docstring__)
+    Print(__doc__)
