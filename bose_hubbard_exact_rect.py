@@ -137,8 +137,10 @@ class ParamData:
           assert type(field).__module__ == np.__name__, "Field needs a numpy array"
           assert field.size >= lattice_size, "Field array too small"
           h = field.flatten() if rank == 0 else None
-          h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root 
+          h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root
+          self.field = True
       else:
+          self.field = False
           h = 0.0
       #Interaction
       U = self.int_strength

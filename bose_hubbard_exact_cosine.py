@@ -152,8 +152,10 @@ class ParamData:
           assert field.size >= lattice_size, "Field array too small"
           h = field.flatten() if rank == 0 else None
           h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root 
+          self.field = True
       else:
           h = 0.0
+          self.field = False
       #Interaction
       U = self.int_strength
       #Dimensionality of the hilbert space
