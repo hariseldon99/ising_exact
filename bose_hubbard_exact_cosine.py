@@ -63,39 +63,34 @@ petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
 
+def dumpclean(obj):
+    """
+    Neatly prints dictionaries line by line
+    """
+    if type(obj) == dict:
+        for k, v in obj.items():
+            if hasattr(v, '__iter__'):
+                Print(k)
+                dumpclean(v)
+            else:
+                Print('%s : %s' % (k, v))
+    elif type(obj) == list:
+        for v in obj:
+            if hasattr(v, '__iter__'):
+                dumpclean(v)
+            else:
+                Print(v)
+    else:
+        Print(obj)
+
 def verboseprint(verbosity, *args):
     """
     print args if verbose mode is enabled
     """
     if verbosity:
         for arg in args:
-            Print(arg)
+            dumpclean(arg)
         Print(" ")
-
-def index(a, x):
-    """
-    Locate the leftmost value exactly equal to x
-    """
-    i = bisect_left(a, x)
-    if i != len(a) and a[i] == x:
-        return i
-    raise ValueError
-
-def boxings(n, k):
-    """
-    boxings(n, k) -> iterator
-    Generate all ways to place n indistiguishable items into k
-    distinguishable boxes
-    """
-    seq = [n] * (k-1)
-    while True:
-        yield map(sub, chain(seq, [n]), chain([0], seq))
-        for i, x in enumerate(seq):
-            if x:
-                seq[:i+1] = [x-1] * (i+1)
-                break
-        else:
-            return
 
 def drive(t, a, f):
     """
@@ -172,7 +167,7 @@ class ParamData:
           all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
           fockstate_tags = np.zeros(d)
           h_int_diag = np.zeros_like(fockstate_tags)
-          for row_i, row in enumerate(boxings(n,m)):
+          for row_i, row in enumerate(self.boxings(n,m)):
               all_fockstates[row_i,:] = row
               row = np.array(row)
               fockstate_tags[row_i] = tagweights.dot(row)
@@ -202,7 +197,7 @@ class ParamData:
                       #Tag this hopped vector
                       tag = tagweights.dot(fockv_hopped)
                       #Binary search for this tag in the sorted array of tags
-                      w = index(fockstate_tags, tag) 
+                      w = self.index(fockstate_tags, tag) 
                       #Get the corresponding row index 
                       u = tag_inds[w]
                       #Add the hopping amplitude to the matrix element
@@ -220,6 +215,31 @@ class ParamData:
       self.jac_ke  = self.comm.tompi4py().bcast(self.jac_ke, root=0)
       if rank == 0:
           verboseprint(self.verbose, vars(self))
+
+    def index(self, a, x):
+        """
+        Locate the leftmost value exactly equal to x
+        """
+        i = bisect_left(a, x)
+        if i != len(a) and a[i] == x:
+            return i
+        raise ValueError
+    
+    def boxings(self, n, k):
+        """
+        boxings(n, k) -> iterator
+        Generate all ways to place n indistiguishable items into k
+        distinguishable boxes
+        """
+        seq = [n] * (k-1)
+        while True:
+            yield map(sub, chain(seq, [n]), chain([0], seq))
+            for i, x in enumerate(seq):
+                if x:
+                    seq[:i+1] = [x-1] * (i+1)
+                    break
+            else:
+                return
 
 class FloquetMatrix:
      
@@ -276,7 +296,7 @@ class FloquetMatrix:
             psi_t = \
                 odeint(func,\
                         np.concatenate((init.real, init.imag)),\
-                                              times, args=(params,), Dfun=None)         
+                                              times, args=(params,), Dfun=jac)         
             #Store the final state after evolution
             local_data[loc_i,:] = psi_t[-1][:d] + (1j)*psi_t[-1][d:]
         #Write the stored final states to the corresponding rows of fmat

@@ -43,6 +43,7 @@ Reference:
     J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.   
 """
 import os, tempfile as tmpf
+
 import numpy as np
 from math import factorial
 
@@ -53,15 +54,34 @@ from bisect import bisect_left
 from scipy.sparse import lil_matrix
 
 from petsc4py import PETSc
-#from PETSc.InsertMode import ADD_VALUES, INSERT_VALUES
-
-Print = PETSc.Sys.Print
 from slepc4py import SLEPc
 
+Print = PETSc.Sys.Print
 timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
+slepc_mtol = 1e-7 #tolerance for matrix exponentiation
+
+def dumpclean(obj):
+    """
+    Neatly prints dictionaries line by line
+    """
+    if type(obj) == dict:
+        for k, v in obj.items():
+            if hasattr(v, '__iter__'):
+                Print(k)
+                dumpclean(v)
+            else:
+                Print('%s : %s' % (k, v))
+    elif type(obj) == list:
+        for v in obj:
+            if hasattr(v, '__iter__'):
+                dumpclean(v)
+            else:
+                Print(v)
+    else:
+        Print(obj)
 
 def verboseprint(verbosity, *args):
     """
@@ -69,37 +89,12 @@ def verboseprint(verbosity, *args):
     """
     if verbosity:
         for arg in args:
-            Print(arg)
+            dumpclean(arg)
         Print(" ")
 
-def index(a, x):
-    """
-    Locate the leftmost value exactly equal to x
-    """
-    i = bisect_left(a, x)
-    if i != len(a) and a[i] == x:
-        return i
-    raise ValueError
-
-def boxings(n, k):
-    """
-    boxings(n, k) -> iterator
-    Generate all ways to place n indistiguishable items into k
-    distinguishable boxes
-    """
-    seq = [n] * (k-1)
-    while True:
-        yield map(sub, chain(seq, [n]), chain([0], seq))
-        for i, x in enumerate(seq):
-            if x:
-                seq[:i+1] = [x-1] * (i+1)
-                break
-        else:
-            return
-
 class ParamData:
-    """Class that stores Hamiltonian matrices and and system parameters. 
-       This class has no methods other than the constructor.
+    """
+    Class that stores Hamiltonian matrices and and system parameters. 
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
                                 duty_cycle=0.5, int_strength=1.0, field=None,\
@@ -157,7 +152,7 @@ class ParamData:
           #Build the dxm-size fock state matrix as per ref in docstring
           all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
           fockstate_tags = np.zeros(d)
-          for row_i, row in enumerate(boxings(n,m)):
+          for row_i, row in enumerate(self.boxings(n,m)):
               all_fockstates[row_i,:] = row
               row = np.array(row)
               fockstate_tags[row_i] = tagweights.dot(row)
@@ -200,7 +195,7 @@ class ParamData:
                       #Tag this hopped vector
                       tag = tagweights.dot(fockv_hopped)
                       #Binary search for this tag in the sorted array of tags
-                      w = index(fockstate_tags, tag) 
+                      w = self.index(fockstate_tags, tag) 
                       #Get the corresponding row index 
                       u = tag_inds[w]
                       if rstart <= u < rend: #set local row val only
@@ -208,6 +203,31 @@ class ParamData:
                           self.hamilt_ke[u,v] = val
                           self.hamilt_ke[v,u] = val
       self.hamilt_ke.assemble()
+
+    def index(self, a, x):
+        """
+        Locate the leftmost value exactly equal to x
+        """
+        i = bisect_left(a, x)
+        if i != len(a) and a[i] == x:
+            return i
+        raise ValueError
+
+    def boxings(self, n, k):
+        """
+        boxings(n, k) -> iterator
+        Generate all ways to place n indistiguishable items into k
+        distinguishable boxes
+        """
+        seq = [n] * (k-1)
+        while True:
+            yield map(sub, chain(seq, [n]), chain([0], seq))
+            for i, x in enumerate(seq):
+                if x:
+                    seq[:i+1] = [x-1] * (i+1)
+                    break
+            else:
+                return            
 
 class FloquetMatrix:
     
@@ -223,15 +243,31 @@ class FloquetMatrix:
 
         Return value: 
             An object that stores an initiated PETSc Floquet Matrix 
-           
-        The constructor just creates blank vectors for exponentiating 
-        the hamiltonian
         """
-        self.fmat = None
-        self.soln, self.unit = params.hamilt_ke.getVecs()
-        self.soln.set(0)
-        self.soln.assemble()
+        pass
     
+    def solve_exp(self, t, H, b, x):
+        """
+        Setup the solver of the petsc matrix function |x> = exp(-IHt)|b>
+        """
+        M = SLEPc.MFN().create()
+        M.setOperator(H)
+        f = M.getFN()
+        f.setType(SLEPc.FN.Type.EXP)
+        s = -1j * t
+        f.setScale(s)
+        M.setTolerances(slepc_mtol)
+        M.solve(b,x)
+    
+    def ralloc(self, mat, row, vec):
+        """
+        Allocate the data in petsc vec to the row in petsc mat
+        """
+        locfirst, loclast = vec.getOwnershipRange()
+        loc_idx = range(locfirst, loclast)
+        dataloc = vec.getArray()
+        mat.setValues([row],loc_idx,dataloc)
+        
     def evolve(self, params):
         """
         This evaluates the Floquet Matrix of rectangle wave drive
@@ -241,18 +277,40 @@ class FloquetMatrix:
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
+            Hf.fmat.view()
         Argument:
            p = An object instance of the ParamData class.
-        Return value: 
-           None
-        TODO: All this. See SLEPc docs on exponentiating parallel matrices
-              using SLEPc.MFN and SLEPC.FN (matrix functions)
         """
-        d = params.dimension
-
-            
-    def eigensys(self, params, get_evecs=False,\
-                        solver_type=SLEPc.EPS.Type.KRYLOVSCHUR, cachedir=None):
+        soln, unit = params.hamilt_ke.getVecs()
+        soln.set(0)
+        soln.assemble()
+        T = 2.0 * np.pi/params.freq
+        t1 = params.duty_cycle * T
+        hamilt_1 = (1.0 + params.amp) * params.hamilt_ke + params.hamilt_int
+        fmat_1 = PETSc.Mat().create()
+        fmat_1.setSizes([params.dimension, params.dimension])
+        fmat_1.setUp()
+        t2 = (1.0 - params.duty_cycle) * T
+        hamilt_2 = (1.0 - params.amp) * params.hamilt_ke + params.hamilt_int
+        fmat_2 = PETSc.Mat().create()
+        fmat_2.setSizes([params.dimension, params.dimension])
+        fmat_2.setUp()
+        for col in xrange(params.dimension):
+            unit.set(0)
+            unit[col] = 1.0
+            unit.assemble()
+            self.solve_exp(t1, hamilt_1, unit, soln)
+            self.ralloc(fmat_1, col, soln)
+            self.solve_exp(t2, hamilt_2, unit, soln)
+            self.ralloc(fmat_2, col, soln)
+        fmat_1.assemble()
+        fmat_2.assemble()
+        #Transpose to column ordered floquet matrices
+        fmat_1.transpose()
+        fmat_2.transpose()
+        self.fmat = fmat_2.matMult(fmat_1)
+                                                                             
+    def eigensys(self, params, get_evecs=False, cachedir=None):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
         evals. It used PETSc/SLEPc to do this.
@@ -264,9 +322,7 @@ class FloquetMatrix:
         Arguments:
             p            = An object instance of the ParamData class.
             get_evecs    = Boolean (optional, default False). Set to true
-                            for getting the eigenvector matrix (row wise)
-            solver_type  = SLEPc eigenvalue solver type. 
-                            Default is SLEPc.EPS.Type.KRYLOVSCHUR .                
+                            for getting the eigenvector matrix (row wise)                
             cachedir     = Directory path as a string (optional, default None). 
                             If provided, then it is used to cache large Floquet 
                             matrices to temp file in there instead of memory.
@@ -301,11 +357,29 @@ class FloquetMatrix:
             fmat_loc.load(viewer)
         #Finish setting up the eigensolver and execute it
         E.setOperators(fmat_loc)
-        E.setType(solver_type)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
+        E.setDimensions(nev=params.dimension)#Need all the eigenvalues
         E.solve()
         nconv = E.getConverged() #Number of converged eigenvalues
-        assert nconv == params.dimension, "All the eigenvalues failed to converge"
+        verboseprint(params.verbose,"*** SLEPc Solution Results ***")
+        its = E.getIterationNumber()
+        verboseprint(params.verbose,"Number of iterations of the method: %d" % its)
+        eps_type = E.getType()
+        verboseprint(params.verbose,"Solution method: %s" % eps_type)
+        nev, ncv, mpd = E.getDimensions()
+        verboseprint(params.verbose,"Number of requested eigenvalues: %d" % nev)
+        verboseprint(params.verbose,"Number of converged eigenvalues: %d" % nconv)
+        tol, maxit = E.getTolerances()
+        verboseprint(params.verbose,"Stopping condition: tol=%.4g, maxit=%d" %\
+        (tol, maxit))
+        res = E.getConvergedReason()
+        verboseprint(params.verbose,"Reason for convergence or divergence: %r"% res)
+        verboseprint(params.verbose,"Enumerated key of reason codes:")
+        a =  vars(E.ConvergedReason)
+        reasons_key = {i:a[i] for i in a if 'CONVERGED' in i or 'DIVERGED' in i}
+        verboseprint(params.verbose, reasons_key)
+        assert nconv == params.dimension,\
+            "Only %r out of %r eigenvalues converged" % (nconv, params.dimension)
         evals, er = fmat_loc.getVecs()
         evals_err, eer = fmat_loc.getVecs()
         if get_evecs:
