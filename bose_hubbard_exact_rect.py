@@ -312,7 +312,7 @@ class FloquetMatrix:
         fmat_2.transpose()
         self.fmat = fmat_2.matMult(fmat_1)
                                                                              
-    def eigensys(self, params, get_evecs=False, cachedir=None):
+    def eigensys(self, params, get_evecs=False, cachedir=None, lapack=False):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
         evals. It used PETSc/SLEPc to do this.
@@ -328,6 +328,11 @@ class FloquetMatrix:
             cachedir     = Directory path as a string (optional, default None). 
                             If provided, then it is used to cache large Floquet 
                             matrices to temp file in there instead of memory.
+            lapack       = Boolean. Default False.
+                            Use serial lapack to diagonalize the Floquet matrix.
+                            By default, parallel Krylov-Schur method is used.
+                            Less accurate but more suitable for large sparse 
+                            matrices.
         Return value: 
             Tuple consisting of eigenvalues (array) and their errors both as
             PETSc vectors. If evaluated, the eigenvector matrix is stored as 
@@ -359,6 +364,8 @@ class FloquetMatrix:
             fmat_loc.load(viewer)
         #Finish setting up the eigensolver and execute it
         E.setOperators(fmat_loc)
+        if lapack:
+            E.setType(SLEPc.EPS.Type.LAPACK)
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         E.setDimensions(nev=params.dimension)#Need all the eigenvalues
         E.solve()
