@@ -39,6 +39,11 @@ Usage:
 Note: 
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
+
+TODO 1: Get ground state at t=0 into a petsc vec
+TODO 2: Evolve ground state with Floquet Matrix for n time periods 
+        ie raise floquet matrix to nth power and multiply w gndstate
+
 Reference:
     J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.   
 """
