@@ -25,7 +25,7 @@ Usage:
     >>> Hf = bh.FloquetMatrix(p)
     >>> Hf.fmat.view()
     >>> Print("Evolving the Floquet Matrix by one time period:")
-    >>> Hf.evolve(p)
+    >>> Hf.generate(p)
     >>> Print("New Floquet Matrix is the transpose of the below matrix:")
     >>> Hf.fmat.view()
     >>> Print("Transposing and diagonalizing the Floquet matrix. Eigenvalues:")
@@ -40,12 +40,9 @@ Note:
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
 
-TODO 1: Get ground state at t=0 into a petsc vec
-TODO 2: Evolve ground state with Floquet Matrix for n time periods 
-        ie raise floquet matrix to nth power and multiply w gndstate
-
-Reference:
-    J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.   
+References:
+    [1] J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.
+    [2] Penrose O and Onsager L, Phys. Ref. 104, 576-84 (1956).
 """
 import os, tempfile as tmpf
 
@@ -66,7 +63,7 @@ timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
 slepc_complex = np.complex128
-slepc_mtol = 1e-7 #tolerance for matrix exponentiation
+slepc_mtol = 1e-7 #tolerance for matrix functions
 
 def dumpclean(obj):
     """
@@ -97,13 +94,38 @@ def verboseprint(verbosity, *args):
             dumpclean(arg)
         Print(" ")
 
+def vprint_eigen(verbosity, solver):
+    """
+    verbose print of an eigenvalue solver. also returns number of converged
+    eigenvalues.
+    """
+    nconv = solver.getConverged() #Number of converged eigenvalues
+    verboseprint(verbosity,"*** SLEPc Solution Results ***")
+    its = solver.getIterationNumber()
+    verboseprint(verbosity,"Number of iterations of the method: %d" % its)
+    eps_type = solver.getType()
+    verboseprint(verbosity,"Solution method: %s" % eps_type)
+    nev, ncv, mpd = solver.getDimensions()
+    verboseprint(verbosity,"Number of requested eigenvalues: %d" % nev)
+    verboseprint(verbosity,"Number of converged eigenvalues: %d" % nconv)
+    tol, maxit = solver.getTolerances()
+    verboseprint(verbosity,"Stopping condition: tol=%.4g, maxit=%d" %\
+    (tol, maxit))
+    res = solver.getConvergedReason()
+    verboseprint(verbosity,"Reason for convergence or divergence: %r"% res)
+    verboseprint(verbosity,"Enumerated key of reason codes:")
+    a =  vars(solver.ConvergedReason)
+    reasons_key = {i:a[i] for i in a if 'CONVERGED' in i or 'DIVERGED' in i}
+    verboseprint(verbosity, reasons_key)
+    return nconv
+
 class ParamData:
     """
     Class that stores Hamiltonian matrices and and system parameters. 
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
-                                duty_cycle=0.5, int_strength=1.0, field=None,\
-                                      mpicomm=PETSc.COMM_WORLD, verbose=False):                       
+                 duty_cycle=0.5, int_strength=1.0, field=None,lapack=False,\
+                                     mpicomm=PETSc.COMM_WORLD, verbose=False):                       
       """
        Usage:
        p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
@@ -122,11 +144,15 @@ class ParamData:
                        Defaults to 1.
        field        = Optional numpy array of spatially varying field. 
                        Defaults to None.
+       lapack       = Boolean. Default False. Use serial lapack to diagonalize 
+                       the hamiltonian.   
        mpicomm      = MPI Communicator. Defaults to PETSc.COMM_WORLD
        verbose      = Boolean for verbose output. Defaults to False
 
        Return value: 
-       An object that stores all the parameters above. 
+       An object that stores all the parameters above, as well as the fock states
+       and the kinetic and potential energy matrices. Also ground state stored
+       as a petsc vec.
       """
       self.lattice_size = lattice_size
       self.particle_no = particle_no
@@ -154,33 +180,33 @@ class ParamData:
       size = self.comm.Get_size()      
       assert self.dimension >= size, "There are fewer rows than MPI procs!"
       d = self.dimension
+      if rank == 0:
+          verboseprint(self.verbose, vars(self))
       tagweights = np.sqrt(100 * np.arange(m) + 3)
       if rank == 0:
-          #Build the dxm-size fock state matrix as per ref in docstring
-          all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
+          #Build the dxm-size fock state matrix as per ref[1] in docstring
+          self.all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
           fockstate_tags = np.zeros(d)
           for row_i, row in enumerate(self.boxings(n,m)):
-              all_fockstates[row_i,:] = row
+              self.all_fockstates[row_i,:] = row
               row = np.array(row)
               fockstate_tags[row_i] = tagweights.dot(row)
           #Sort the tags and store the original indices
           tag_inds = np.argsort(fockstate_tags)
           fockstate_tags = fockstate_tags[tag_inds]
       else:
-          all_fockstates = None          
+          self.all_fockstates = None          
           tag_inds = None          
           fockstate_tags = None
-      all_fockstates = self.comm.tompi4py().bcast(all_fockstates, root=0)        
+      self.all_fockstates = self.comm.tompi4py().bcast(self.all_fockstates, root=0)        
       tag_inds = self.comm.tompi4py().bcast(tag_inds, root=0)    
       fockstate_tags = self.comm.tompi4py().bcast(fockstate_tags, root=0)    
-      if rank == 0:
-          verboseprint(self.verbose, vars(self))
       #Build the interaction + field part of the hamiltonian
       self.hamilt_int = PETSc.Mat().create(comm=self.comm)
       self.hamilt_int.setSizes([d,d])
       self.hamilt_int.setUp() 
       rstart, rend = self.hamilt_int.getOwnershipRange()
-      for v, fock_v in enumerate(all_fockstates):
+      for v, fock_v in enumerate(self.all_fockstates):
           if rstart <= v < rend: #set locally
               fockv_den = fock_v.toarray()
               self.hamilt_int[v,v] = np.sum(fockv_den * (U * (fockv_den-1) - h))
@@ -190,7 +216,7 @@ class ParamData:
       rstart, rend = self.hamilt_ke.getOwnershipRange()
       for site in xrange(m):  
               next_site = 0 if site==m-1 else site+1 #Periodic bc
-              for v, fock_v in enumerate(all_fockstates):
+              for v, fock_v in enumerate(self.all_fockstates):
                   fock_v = fock_v.toarray().flatten()
                   #Note that, if any site has no particles, then one annihilation
                   #operator nullifies the whole state
@@ -210,6 +236,22 @@ class ParamData:
                           self.hamilt_ke[u,v] = val
                           self.hamilt_ke[v,u] = val
       self.hamilt_ke.assemble()
+      #Now, get the ground state ONLY using SLEPc
+      E = SLEPc.EPS() 
+      E.create()
+      E.setOperators(self.hamilt_ke + self.hamilt_int)
+      if lapack:
+          E.setType(SLEPc.EPS.Type.LAPACK)
+      E.setProblemType(SLEPc.EPS.ProblemType.HEP)
+      E.setWhichEigenpairs(SLEPc.EPS.Which.SMALLEST_REAL)
+      E.solve()
+      nconv = vprint_eigen(self.verbose, E)
+      assert nconv >= 1, "Convergence of ground state eigensolver failed!!!"
+      self.groundstate, wr = self.hamilt_ke.getVecs()
+      vi, wi = self.hamilt_ke.getVecs()
+      self.groundstate_energy = E.getEigenpair(0, self.groundstate, vi)
+      #Complexify the eigenvector by vr = (1j)* vi + vr
+      self.groundstate.axpy(1j,vi)
 
     def index(self, a, x):
         """
@@ -252,10 +294,20 @@ class FloquetMatrix:
             An object that stores an initiated PETSc Floquet Matrix 
         """
         pass
-    
+
+    def build_dmat(self, state):
+        """
+        Build the density matrix from a closed quantum state
+        This is the 1-particle reduced density matrix as per refs [1,2]
+        State MUST be a petsc vector
+        TODO: DO THIS
+        """
+        
+
     def solve_exp(self, t, H, b, x):
         """
-        Setup the solver of the petsc matrix function |x> = exp(-IHt)|b>
+        Setup the and solve the petsc matrix function |x> = exp(-IHt)|b>
+        See SLEPc manual chapters 7 and 8 to understand this
         """
         M = SLEPc.MFN().create()
         M.setOperator(H)
@@ -263,6 +315,20 @@ class FloquetMatrix:
         f.setType(SLEPc.FN.Type.EXP)
         s = -1j * t
         f.setScale(s)
+        M.setTolerances(slepc_mtol)
+        M.solve(b,x)
+
+    def solve_pow(self, n, H, b, x):
+        """
+        Setup the and solve the petsc matrix function |x> = H^n|b>
+        See SLEPc manual chapters 7 and 8 to understand this
+        """
+        M = SLEPc.MFN().create()
+        M.setOperator(H)
+        f = M.getFN()
+        f.setType(SLEPc.FN.Type.RATIONAL)
+        f.setRationalDenominator([1])
+        f.setRationalNumerator(np.eye(1,n+1,n))
         M.setTolerances(slepc_mtol)
         M.solve(b,x)
     
@@ -275,7 +341,7 @@ class FloquetMatrix:
         dataloc = vec.getArray()
         mat.setValues([row],loc_idx,dataloc)
         
-    def evolve(self, params):
+    def generate(self, params):
         """
         This evaluates the Floquet Matrix of rectangle wave drive
         If the Hamiltonian is H_1 for the first cycle of the period  
@@ -283,7 +349,7 @@ class FloquetMatrix:
         Matrix is exp(-I H_2 (T-t)) \times exp(-I H_1 t).
         Usage:
             HF = FloquetMatrix(p)
-            HF.evolve(p)
+            HF.generate(p)
             Hf.fmat.view()
         Argument:
            p = An object instance of the ParamData class.
@@ -316,7 +382,60 @@ class FloquetMatrix:
         fmat_1.transpose()
         fmat_2.transpose()
         self.fmat = fmat_2.matMult(fmat_1)
-                                                                             
+        
+    def evolve(self, time, params):
+        """
+        This evolves the ground state by integer multiples of the time period.
+        It raises the Floquet matrix to the nth power and multiplies to the state.
+        
+        Usage:
+            HF = FloquetMatrix(p)
+            HF.generate(p)
+            state = HF.evolve(10,p)
+        Arguments:
+            time      = This needs to be an integer. The state will be evolved
+                        in integer multiples of the time period i.e 2*pi/p.freq
+            p         = An object instance of the ParamData class.
+            
+        Return value:
+            PETSc vec of the final state
+        """
+        #We want to compute self.fmat^time |self.groundstate>
+        assert isinstance( time , ( int, long ) ), "Time needs to be an integer"
+        final_state = params.groundstate.duplicate()
+        self.solve_pow(time, self.fmat, params.groundstate, final_state)
+        return final_state
+        
+    def get_cfrac(self, state, params, lapack=False):
+        """
+        This gets the condensate fraction of the state vector provided
+        i.e, the largest eigenvalue of the corresponding density matrix, scaled
+        by particle number according to the Penrose Onsager criterion [2].
+        
+        Usage:
+            HF = FloquetMatrix(p)
+            HF.generate(p)
+            state = HF.evolve(10,p)
+            condensate_fraction = HF.get_cfrac(state,p, lapack = False)
+        Return value:
+            The condensate fraction
+        Note
+            'p' is an object of the class ParamData.
+             lapack is a boolean. Default False. Set to serial lapack to 
+             diagonalize the density matrix.
+        """
+        rho = self.build_dmat(state)
+        #Now, get the biggest eigenval ONLY using SLEPc
+        E = SLEPc.EPS() 
+        E.create()
+        E.setOperators(rho)
+        E.setProblemType(SLEPc.EPS.ProblemType.HEP)
+        E.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
+        E.solve()
+        nconv = vprint_eigen(self.verbose, E)
+        assert nconv >= 1, "Convergence of ground state eigensolver failed!!!"
+        return E.getEigenvalue(0)/params.particle_no
+
     def eigensys(self, params, get_evecs=False, cachedir=None, lapack=False):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
@@ -333,11 +452,8 @@ class FloquetMatrix:
             cachedir     = Directory path as a string (optional, default None). 
                             If provided, then it is used to cache large Floquet 
                             matrices to temp file in there instead of memory.
-            lapack       = Boolean. Default False.
-                            Use serial lapack to diagonalize the Floquet matrix.
-                            By default, parallel Krylov-Schur method is used.
-                            Less accurate but more suitable for large sparse 
-                            matrices.
+            lapack       = Boolean. Default False. Use serial lapack to 
+                            diagonalize the Floquet matrix.
         Return value: 
             Tuple consisting of eigenvalues (array) and their errors both as
             PETSc vectors. If evaluated, the eigenvector matrix is stored as 
@@ -355,7 +471,8 @@ class FloquetMatrix:
         else:
             cache = True
             assert type(cachedir) == str, "Please enter a valid path to cachedir"
-            assert os.path.exists(cachedir),  "Please enter a valid path to cachedir"
+            assert os.path.exists(cachedir),\
+                                        "Please enter a valid path to cachedir"
             #Only root should create the file and broadcast to all proce
             cfile = tmpf.NamedTemporaryFile(dir=cachedir) if rank == 0 else None
             fname = cfile.name if rank == 0 else None
@@ -374,24 +491,7 @@ class FloquetMatrix:
         E.setProblemType(SLEPc.EPS.ProblemType.NHEP)
         E.setDimensions(nev=params.dimension)#Need all the eigenvalues
         E.solve()
-        nconv = E.getConverged() #Number of converged eigenvalues
-        verboseprint(params.verbose,"*** SLEPc Solution Results ***")
-        its = E.getIterationNumber()
-        verboseprint(params.verbose,"Number of iterations of the method: %d" % its)
-        eps_type = E.getType()
-        verboseprint(params.verbose,"Solution method: %s" % eps_type)
-        nev, ncv, mpd = E.getDimensions()
-        verboseprint(params.verbose,"Number of requested eigenvalues: %d" % nev)
-        verboseprint(params.verbose,"Number of converged eigenvalues: %d" % nconv)
-        tol, maxit = E.getTolerances()
-        verboseprint(params.verbose,"Stopping condition: tol=%.4g, maxit=%d" %\
-        (tol, maxit))
-        res = E.getConvergedReason()
-        verboseprint(params.verbose,"Reason for convergence or divergence: %r"% res)
-        verboseprint(params.verbose,"Enumerated key of reason codes:")
-        a =  vars(E.ConvergedReason)
-        reasons_key = {i:a[i] for i in a if 'CONVERGED' in i or 'DIVERGED' in i}
-        verboseprint(params.verbose, reasons_key)
+        nconv = vprint_eigen(params.verbose, E)
         assert nconv == params.dimension,\
             "Only %r out of %r eigenvalues converged" % (nconv, params.dimension)
         evals, er = fmat_loc.getVecs()
@@ -408,12 +508,7 @@ class FloquetMatrix:
             if get_evecs:
                 #Complexify the eigenvector by vr = (1j)* vi + vr
                 vr.axpy(1j,vi)
-                #Insert into evecs the local block of eigenvector data
-                locfirst, loclast = vr.getOwnershipRange()
-                loc_idx = range(locfirst, loclast)
-                dataloc = vr.getArray()
-                #Set the real parts
-                self.evecs.setValues([i],loc_idx,dataloc)
+                self.ralloc(self.evecs, i, vr)
         evals.assemble()
         evals_err.assemble()
         if get_evecs:
