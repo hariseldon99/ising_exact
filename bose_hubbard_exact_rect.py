@@ -8,6 +8,7 @@ Floquet Matrix formulation and diagonalization of the Bose Hubbard model with
 periodic drive (rectangular wave):
 
 To be run as as an imported module.
+
 Usage:
     >>> import numpy as np
     >>> import sys
@@ -43,7 +44,12 @@ Note:
 References:
     [1] J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.
     [2] Penrose O and Onsager L, Phys. Ref. 104, 576-84 (1956).
+    
+TODO:
+    Putting parameters that cause a Hamiltonian to zero out completely
+    creates NaN errors while exponentiating. Put in a control to eliminate this
 """
+
 import os, tempfile as tmpf
 
 import numpy as np
@@ -56,9 +62,9 @@ from bisect import bisect_left
 from scipy.sparse import lil_matrix
 
 from petsc4py import PETSc
+Print = PETSc.Sys.Print
 from slepc4py import SLEPc
 
-Print = PETSc.Sys.Print
 timesteps = 100
 petsc_int = np.int32 #petsc, by default. Uses 32-bit integers for indices
 ode_dtype = np.float64 #scipy.odeint does not do complex numbers, so use this.
@@ -152,7 +158,8 @@ class ParamData:
        Return value: 
        An object that stores all the parameters above, as well as the fock states
        and the kinetic and potential energy matrices. Also ground state stored
-       as a petsc vec.
+       as a petsc vec. Finally, the matrix elements of the off-diagonal order 
+       parameter a^\dagger_0 a_[M/2] (M = lattice_size) are stored.
       """
       self.lattice_size = lattice_size
       self.particle_no = particle_no
@@ -173,8 +180,6 @@ class ParamData:
       else:
           self.field = False
           h = 0.0
-      #Interaction
-      U = self.int_strength
       #Dimensionality of the hilbert space
       self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
       size = self.comm.Get_size()      
@@ -182,60 +187,45 @@ class ParamData:
       d = self.dimension
       if rank == 0:
           verboseprint(self.verbose, vars(self))
-      tagweights = np.sqrt(100 * np.arange(m) + 3)
+      self.tagweights = np.sqrt(100 * np.arange(m) + 3)
       if rank == 0:
           #Build the dxm-size fock state matrix as per ref[1] in docstring
           self.all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
-          fockstate_tags = np.zeros(d)
+          self.fockstate_tags = np.zeros(d)
           for row_i, row in enumerate(self.boxings(n,m)):
               self.all_fockstates[row_i,:] = row
               row = np.array(row)
-              fockstate_tags[row_i] = tagweights.dot(row)
+              self.fockstate_tags[row_i] = self.tagweights.dot(row)
           #Sort the tags and store the original indices
-          tag_inds = np.argsort(fockstate_tags)
-          fockstate_tags = fockstate_tags[tag_inds]
+          self.tag_inds = np.argsort(self.fockstate_tags)
+          self.fockstate_tags = self.fockstate_tags[self.tag_inds]
       else:
           self.all_fockstates = None          
-          tag_inds = None          
-          fockstate_tags = None
+          self.tag_inds = None          
+          self.fockstate_tags = None
       self.all_fockstates = self.comm.tompi4py().bcast(self.all_fockstates, root=0)        
-      tag_inds = self.comm.tompi4py().bcast(tag_inds, root=0)    
-      fockstate_tags = self.comm.tompi4py().bcast(fockstate_tags, root=0)    
+      self.tag_inds = self.comm.tompi4py().bcast(self.tag_inds, root=0)    
+      self.fockstate_tags = self.comm.tompi4py().bcast(self.fockstate_tags, root=0)    
       #Build the interaction + field part of the hamiltonian
       self.hamilt_int = PETSc.Mat().create(comm=self.comm)
       self.hamilt_int.setSizes([d,d])
       self.hamilt_int.setUp() 
       rstart, rend = self.hamilt_int.getOwnershipRange()
-      for v, fock_v in enumerate(self.all_fockstates):
-          if rstart <= v < rend: #set locally
-              fockv_den = fock_v.toarray()
-              self.hamilt_int[v,v] = np.sum(fockv_den * (U * (fockv_den-1) - h))
+      self.int_matset(self.hamilt_int, (rstart, rend),h)
       self.hamilt_int.assemble()
       #Now, set the kinetic energy matrix separately
       self.hamilt_ke = self.hamilt_int.duplicate()
       rstart, rend = self.hamilt_ke.getOwnershipRange()
       for site in xrange(m):  
               next_site = 0 if site==m-1 else site+1 #Periodic bc
-              for v, fock_v in enumerate(self.all_fockstates):
-                  fock_v = fock_v.toarray().flatten()
-                  #Note that, if any site has no particles, then one annihilation
-                  #operator nullifies the whole state
-                  if fock_v[next_site] != 0:
-                      #Hop a particle in fock_v from i to i+1 & store.
-                      fockv_hopped = np.copy(fock_v)
-                      fockv_hopped[site] += 1
-                      fockv_hopped[next_site] -= 1
-                      #Tag this hopped vector
-                      tag = tagweights.dot(fockv_hopped)
-                      #Binary search for this tag in the sorted array of tags
-                      w = self.index(fockstate_tags, tag) 
-                      #Get the corresponding row index 
-                      u = tag_inds[w]
-                      if rstart <= u < rend: #set local row val only
-                          val = -np.sqrt((fock_v[site]+1) * fock_v[next_site])
-                          self.hamilt_ke[u,v] = val
-                          self.hamilt_ke[v,u] = val
+              self.ke_matset(self.hamilt_ke, site, next_site, (rstart, rend))
       self.hamilt_ke.assemble()
+      #Now, set the off diagonal order parameter matrix elements
+      self.offd_order = self.hamilt_int.duplicate()
+      rstart, rend = self.offd_order.getOwnershipRange()
+      site, next_site = 0, np.floor(self.lattice_size/2.)
+      self.ke_matset(self.offd_order, site, next_site, (rstart, rend))
+      self.offd_order.assemble()
       #Now, get the ground state ONLY using SLEPc
       E = SLEPc.EPS() 
       E.create()
@@ -251,7 +241,52 @@ class ParamData:
       vi, wi = self.hamilt_ke.getVecs()
       self.groundstate_energy = E.getEigenpair(0, self.groundstate, vi)
       #Complexify the eigenvector by vr = (1j)* vi + vr
-      self.groundstate.axpy(1j,vi)
+      self.groundstate.axpy(1j,vi)           
+         
+    def ke_matset(self, mat, i, j, local_block):
+          """
+          Sets all the matrix elements of kinetic energy 'mat' in the fock state
+          representation that come from the lattice sites 'i' and 'j'
+          """               
+          i,j = int(i), int(j)                                                  
+          for v, fock_v in enumerate(self.all_fockstates):
+              fock_v = fock_v.toarray().flatten()
+              #Note that, if any site has no particles, then one annihilation
+              #operator nullifies the whole state
+              if fock_v[j] != 0:
+                  #Hop a particle in fock_v from i to i+1 & store.
+                  fockv_hopped = np.copy(fock_v)
+                  fockv_hopped[i] += 1
+                  fockv_hopped[j] -= 1
+                  #Tag this hopped vector
+                  tag = self.tagweights.dot(fockv_hopped)
+                  #Binary search for this tag in the sorted array of tags
+                  w = self.index(self.fockstate_tags, tag) 
+                  #Get the corresponding row index 
+                  u = self.tag_inds[w]
+                  rstart, rend = local_block
+                  if rstart <= u < rend: #set local row val only
+                      val = -np.sqrt((fock_v[i]+1) * fock_v[j])
+                      mat[u,v] = val
+                      mat[v,u] = val
+     
+    def int_matset(self, mat, local_block, field):
+        U = self.int_strength  
+        for v, fock_v in enumerate(self.all_fockstates):
+            (rstart, rend) = local_block    
+            if rstart <= v < rend: #set locally
+              fockv_den = fock_v.toarray()
+              mat[v,v] = np.sum(fockv_den * (U * (fockv_den-1) - field))
+    
+    def orderparam(self, state):
+        """
+        This gets the order parameter of the state vector provided
+        i.e, the expectation value of the offd_order matrix in ParamData.
+        See "Penrose Onsager criterion" [2].
+        """
+        dummy, new_vector =  self.offd_order.getVecs()  
+        self.offd_order.mult(state, new_vector)
+        return np.abs(new_vector.dot(state))
 
     def index(self, a, x):
         """
@@ -295,15 +330,6 @@ class FloquetMatrix:
         """
         pass
 
-    def build_dmat(self, state):
-        """
-        Build the density matrix from a closed quantum state
-        This is the 1-particle reduced density matrix as per refs [1,2]
-        State MUST be a petsc vector
-        TODO: DO THIS
-        """
-        
-
     def solve_exp(self, t, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = exp(-IHt)|b>
@@ -328,7 +354,7 @@ class FloquetMatrix:
         f = M.getFN()
         f.setType(SLEPc.FN.Type.RATIONAL)
         f.setRationalDenominator([1])
-        f.setRationalNumerator(np.eye(1,n+1,n))
+        f.setRationalNumerator(np.eye(1,n+1,n).flatten()[::-1])
         M.setTolerances(slepc_mtol)
         M.solve(b,x)
     
@@ -355,19 +381,16 @@ class FloquetMatrix:
            p = An object instance of the ParamData class.
         """
         soln, unit = params.hamilt_ke.getVecs()
-        soln.set(0)
-        soln.assemble()
         T = 2.0 * np.pi/params.freq
         t1 = params.duty_cycle * T
         hamilt_1 = (1.0 + params.amp) * params.hamilt_ke + params.hamilt_int
         fmat_1 = PETSc.Mat().create()
         fmat_1.setSizes([params.dimension, params.dimension])
         fmat_1.setUp()
+        fmat_1.assemble()
         t2 = (1.0 - params.duty_cycle) * T
         hamilt_2 = (1.0 - params.amp) * params.hamilt_ke + params.hamilt_int
-        fmat_2 = PETSc.Mat().create()
-        fmat_2.setSizes([params.dimension, params.dimension])
-        fmat_2.setUp()
+        fmat_2 = fmat_1.duplicate()
         for col in xrange(params.dimension):
             unit.set(0)
             unit[col] = 1.0
@@ -402,40 +425,10 @@ class FloquetMatrix:
         """
         #We want to compute self.fmat^time |self.groundstate>
         assert isinstance( time , ( int, long ) ), "Time needs to be an integer"
-        final_state = params.groundstate.duplicate()
+        dummy, final_state = self.fmat.getVecs()
         self.solve_pow(time, self.fmat, params.groundstate, final_state)
         return final_state
         
-    def get_cfrac(self, state, params, lapack=False):
-        """
-        This gets the condensate fraction of the state vector provided
-        i.e, the largest eigenvalue of the corresponding density matrix, scaled
-        by particle number according to the Penrose Onsager criterion [2].
-        
-        Usage:
-            HF = FloquetMatrix(p)
-            HF.generate(p)
-            state = HF.evolve(10,p)
-            condensate_fraction = HF.get_cfrac(state,p, lapack = False)
-        Return value:
-            The condensate fraction
-        Note
-            'p' is an object of the class ParamData.
-             lapack is a boolean. Default False. Set to serial lapack to 
-             diagonalize the density matrix.
-        """
-        rho = self.build_dmat(state)
-        #Now, get the biggest eigenval ONLY using SLEPc
-        E = SLEPc.EPS() 
-        E.create()
-        E.setOperators(rho)
-        E.setProblemType(SLEPc.EPS.ProblemType.HEP)
-        E.setWhichEigenpairs(SLEPc.EPS.Which.LARGEST_REAL)
-        E.solve()
-        nconv = vprint_eigen(self.verbose, E)
-        assert nconv >= 1, "Convergence of ground state eigensolver failed!!!"
-        return E.getEigenvalue(0)/params.particle_no
-
     def eigensys(self, params, get_evecs=False, cachedir=None, lapack=False):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
