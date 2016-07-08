@@ -44,10 +44,6 @@ Note:
 References:
     [1] J M Zhang and R X Dong, Eur. Phys. J 31(3) 591 (2010). arXiv:1102.4006.
     [2] Penrose O and Onsager L, Phys. Ref. 104, 576-84 (1956).
-    
-TODO:
-    Putting parameters that cause a Hamiltonian to zero out completely
-    creates NaN errors while exponentiating. Put in a control to eliminate this
 """
 
 import os, tempfile as tmpf
@@ -242,7 +238,7 @@ class ParamData:
       self.groundstate_energy = E.getEigenpair(0, self.groundstate, vi)
       #Complexify the eigenvector by vr = (1j)* vi + vr
       self.groundstate.axpy(1j,vi)           
-         
+
     def ke_matset(self, mat, i, j, local_block):
           """
           Sets all the matrix elements of kinetic energy 'mat' in the fock state
@@ -328,36 +324,66 @@ class FloquetMatrix:
         Return value: 
             An object that stores an initiated PETSc Floquet Matrix 
         """
-        pass
-
+        pass        
+    
     def solve_exp(self, t, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = exp(-IHt)|b>
         See SLEPc manual chapters 7 and 8 to understand this
         """
-        M = SLEPc.MFN().create()
-        M.setOperator(H)
-        f = M.getFN()
-        f.setType(SLEPc.FN.Type.EXP)
         s = -1j * t
-        f.setScale(s)
-        M.setTolerances(slepc_mtol)
-        M.solve(b,x)
-
+        if self.isdiag(H): #If H is diagonal, then exponentiation is trivial
+            x = H.getDiagonal()
+            x.scale(s)
+            x.exp()
+            x.pointwiseMult(x,b)
+        else: #This method fails for diagonal matrices. Krylov don't work 
+            M = SLEPc.MFN().create()
+            M.setOperator(H)
+            f = M.getFN()
+            f.setType(SLEPc.FN.Type.EXP)
+            f.setScale(s)
+            M.setTolerances(slepc_mtol)
+            M.solve(b,x)
+            
     def solve_pow(self, n, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = H^n|b>
         See SLEPc manual chapters 7 and 8 to understand this
         """
-        M = SLEPc.MFN().create()
-        M.setOperator(H)
-        f = M.getFN()
-        f.setType(SLEPc.FN.Type.RATIONAL)
-        f.setRationalDenominator([1])
-        f.setRationalNumerator(np.eye(1,n+1,n).flatten()[::-1])
-        M.setTolerances(slepc_mtol)
-        M.solve(b,x)
-    
+        if self.isdiag(H): #If H is diagonal, then power is trivial
+            x = H.getDiagonal()
+            for i in xrange(1,n): #pointwisemult n-1 times
+                x.pointwiseMult(x,x)
+            x.pointwiseMult(x,b)
+        else: #This method fails for diagonal matrices. Krylov don't work    
+            M = SLEPc.MFN().create()
+            M.setOperator(H)
+            f = M.getFN()
+            f.setType(SLEPc.FN.Type.RATIONAL)
+            f.setRationalDenominator([1])
+            f.setRationalNumerator(np.eye(1,n+1,n).flatten()[::-1])
+            M.setTolerances(slepc_mtol)
+            M.solve(b,x)
+
+    def isdiag(self, A):
+        """
+        Checks PETSc matrix to determine if diag. It stores diag, zeros it and 
+        calcs the inf-norm/size. If small, then matrix sans diag is 0. Then reset.
+        """
+        size = A.getSize()
+        D = min(size)
+        diag = A.getDiagonal()
+        zero = diag.duplicate()
+        zero.set(0.0)
+        A.setDiagonal(zero)
+        A.assemble()
+        n =  A.norm(norm_type=PETSc.NormType.INF)/D
+        is_diag = True if n <= slepc_mtol else False
+        A.setDiagonal(diag)
+        A.assemble()
+        return is_diag
+        
     def ralloc(self, mat, row, vec):
         """
         Allocate the data in petsc vec to the row in petsc mat
