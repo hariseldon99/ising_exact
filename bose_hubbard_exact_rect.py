@@ -331,40 +331,28 @@ class FloquetMatrix:
         Setup the and solve the petsc matrix function |x> = exp(-IHt)|b>
         See SLEPc manual chapters 7 and 8 to understand this
         """
+        M = SLEPc.MFN().create()
+        M.setOperator(H)
+        f = M.getFN()
+        f.setType(SLEPc.FN.Type.EXP)
         s = -1j * t
-        if self.isdiag(H): #If H is diagonal, then exponentiation is trivial
-            x = H.getDiagonal()
-            x.scale(s)
-            x.exp()
-            x.pointwiseMult(x,b)
-        else: #This method fails for diagonal matrices. Krylov don't work 
-            M = SLEPc.MFN().create()
-            M.setOperator(H)
-            f = M.getFN()
-            f.setType(SLEPc.FN.Type.EXP)
-            f.setScale(s)
-            M.setTolerances(slepc_mtol)
-            M.solve(b,x)
+        f.setScale(s)
+        M.setTolerances(slepc_mtol)
+        M.solve(b,x)
             
     def solve_pow(self, n, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = H^n|b>
         See SLEPc manual chapters 7 and 8 to understand this
         """
-        if self.isdiag(H): #If H is diagonal, then power is trivial
-            x = H.getDiagonal()
-            for i in xrange(1,n): #pointwisemult n-1 times
-                x.pointwiseMult(x,x)
-            x.pointwiseMult(x,b)
-        else: #This method fails for diagonal matrices. Krylov don't work    
-            M = SLEPc.MFN().create()
-            M.setOperator(H)
-            f = M.getFN()
-            f.setType(SLEPc.FN.Type.RATIONAL)
-            f.setRationalDenominator([1])
-            f.setRationalNumerator(np.eye(1,n+1,n).flatten()[::-1])
-            M.setTolerances(slepc_mtol)
-            M.solve(b,x)
+        M = SLEPc.MFN().create()
+        M.setOperator(H)
+        f = M.getFN()
+        f.setType(SLEPc.FN.Type.RATIONAL)
+        f.setRationalDenominator([1])
+        f.setRationalNumerator(np.eye(1,n+1,n).flatten()[::-1])
+        M.setTolerances(slepc_mtol)
+        M.solve(b,x)
 
     def isdiag(self, A):
         """
@@ -410,12 +398,14 @@ class FloquetMatrix:
         T = 2.0 * np.pi/params.freq
         t1 = params.duty_cycle * T
         hamilt_1 = (1.0 + params.amp) * params.hamilt_ke + params.hamilt_int
+        assert self.isdiag(hamilt_1) == False, "Hamiltonian is diagonal. Krylov fails"
         fmat_1 = PETSc.Mat().create()
         fmat_1.setSizes([params.dimension, params.dimension])
         fmat_1.setUp()
         fmat_1.assemble()
         t2 = (1.0 - params.duty_cycle) * T
         hamilt_2 = (1.0 - params.amp) * params.hamilt_ke + params.hamilt_int
+        assert self.isdiag(hamilt_2) == False, "Hamiltonian is diagonal. Krylov fails"        
         fmat_2 = fmat_1.duplicate()
         for col in xrange(params.dimension):
             unit.set(0)
@@ -427,9 +417,6 @@ class FloquetMatrix:
             self.ralloc(fmat_2, col, soln)
         fmat_1.assemble()
         fmat_2.assemble()
-        #Transpose to column ordered floquet matrices
-        fmat_1.transpose()
-        fmat_2.transpose()
         self.fmat = fmat_2.matMult(fmat_1)
         
     def evolve(self, time, params):
@@ -449,6 +436,7 @@ class FloquetMatrix:
         Return value:
             PETSc vec of the final state
         """
+        assert self.isdiag(self.fmat) == False, "Hamiltonian is diagonal. Krylov fails"        
         #We want to compute self.fmat^time |self.groundstate>
         assert isinstance( time , ( int, long ) ), "Time needs to be an integer"
         dummy, final_state = self.fmat.getVecs()
