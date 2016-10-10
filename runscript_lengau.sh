@@ -2,7 +2,7 @@
 #########################################################################
 ## Name of my job
 #PBS -N large_N
-#PBS -l walltime=48:00:00
+#PBS -l walltime=01:00:00
 #########################################################################
 ##Export all PBS environment variables
 #PBS -V
@@ -13,41 +13,41 @@
 #PBS -j oe 
 #########################################################################
 ##Number of nodes and procs/mpiprocs per node.
-#PBS -l select=4:ncpus=18:mpiprocs=9:nodetype=haswell_reg
-#PBS -q normal
+#PBS -l select=1:ncpus=4:mpiprocs=1:nodetype=haswell_reg
+#PBS -q smp
 #PBS -P PHYS0853
 #########################################################################
 ##Send me email when my job aborts, begins, or ends
 #PBS -m ea
 #PBS -M daneel@utexas.edu
 #########################################################################
-SCRIPT="./large_N.py"
+BETA=1.0
+LATSIZE=2
+
+HX=0.0
+HY=0.0
+HZ=0.0
+
+JX=1.0
+JY=0.0
+JZ=0.0
+
+GUD=0.0
+GDU=0.0
+GEL=0.0
+
+#########################################################################
+SCRIPT="./curie_weiss_exact_lindblad.py"
+export OMP_NUM_THREADS=4
 # Make sure I'm the only one that can read my output
 umask 0077
-#Set BLAS threads to 1 per MPI process
-export OMP_NUM_THREADS=1
-# Load the module system
-module load chpc/python/anaconda/2
-#Locally installed PetSc compiled against Python-anaconda module above
-PETSC_DIR=$HOME/.local/petsc-3.7.1
-PETSC_ARCH=arch-linux2-c-opt
-SLEPC_DIR=$HOME/.local/slepc-3.7.1
-export PETSC_DIR
-export PETSC_ARCH
-export SLEPC_DIR
-
-cd $PBS_O_WORKDIR
-
-#########################################################################
-# How many cores total do we have?
-NPROCS=$(cat $PBS_NODEFILE | wc -l)
-#########################################################################
-
-#########################################################################
+#cd $PBS_O_WORKDIR
 ##Now, run the code
 BEGINTIME=$(date +"%s")
-mpirun -np $NPROCS -machinefile $PBS_NODEFILE  python -W ignore $SCRIPT
+python -W ignore $SCRIPT \
+	-l $LATSIZE -b $BETA \
+	-x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ \
+	-gud $GUD -gdu $GDU -gel $GEL 
 ENDTIME=$(date +"%s")
 ELAPSED_TIME=$(($ENDTIME-$BEGINTIME))
-
 echo "#Runtime: $(($ELAPSED_TIME / 60)) minutes and $(($ELAPSED_TIME % 60)) seconds."
