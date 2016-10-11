@@ -21,8 +21,7 @@
 #PBS -m ea
 #PBS -M daneel@utexas.edu
 #########################################################################
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
+NUM_THREADS=4
 BETA=1.0
 LATSIZE=7
 
@@ -38,8 +37,12 @@ GUD=0.1
 GDU=0.1
 GEL=0.08
 
-#########################################################################
 SCRIPT="./curie_weiss_exact_lindblad.py"
+
+#########################################################################
+export OMP_NUM_THREADS=$NUM_THREADS
+export OPENBLAS_NUM_THREADS=$NUM_THREADS
+export MKL_NUM_THREADS=$NUM_THREADS
 # Make sure I'm the only one that can read my output
 umask 0077
 #cd $PBS_O_WORKDIR
@@ -48,7 +51,7 @@ BEGINTIME=$(date +"%s")
 python -W ignore $SCRIPT \
 	-l $LATSIZE -b $BETA \
 	-x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ \
-	-gud $GUD -gdu $GDU -gel $GEL 
+	-gud $GUD -gdu $GDU -gel $GEL -v
 ENDTIME=$(date +"%s")
 ELAPSED_TIME=$(($ENDTIME-$BEGINTIME))
 echo "#Runtime: $(($ELAPSED_TIME / 60)) minutes and $(($ELAPSED_TIME % 60)) seconds."

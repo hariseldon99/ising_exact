@@ -53,7 +53,7 @@ def input():
   parser.add_argument('-oyz', '--output_syzvar',\
     help="sx variance output file", default="syzvar_outfile.txt")
     
-  parser.add_argument("-v", '--verbose', action='store_false', \
+  parser.add_argument("-v", '--verbose', action='store_true', \
     help="increase output verbosity")
 
   parser.add_argument('-pbc', '--periodic', \
@@ -336,8 +336,9 @@ def runising_dyn(params):
   j_sz = np.sum(np.array([h.dissmats(mu)[2] \
     for mu in xrange(h.lattice_size)]), axis=0)      
   
+  pbar = True if params.verbose else None
   result = mesolve(h.hamiltmat, initstate, t_output, [j_sm, j_sp, j_sz],\
-          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar], progress_bar=params.verbose)
+          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar], progress_bar=pbar)
   
   sxdata, sydata, szdata = result.expect[0], result.expect[1], result.expect[2] 
 
