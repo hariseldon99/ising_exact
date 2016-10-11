@@ -21,24 +21,25 @@
 #PBS -m ea
 #PBS -M daneel@utexas.edu
 #########################################################################
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
 BETA=1.0
-LATSIZE=2
+LATSIZE=7
 
 HX=0.0
 HY=0.0
 HZ=0.0
 
-JX=1.0
+JX=0.0
 JY=0.0
-JZ=0.0
+JZ=1.0
 
-GUD=0.0
-GDU=0.0
-GEL=0.0
+GUD=0.1
+GDU=0.1
+GEL=0.08
 
 #########################################################################
 SCRIPT="./curie_weiss_exact_lindblad.py"
-export OMP_NUM_THREADS=4
 # Make sure I'm the only one that can read my output
 umask 0077
 #cd $PBS_O_WORKDIR

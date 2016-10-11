@@ -13,17 +13,10 @@ from pprint import pprint
 from itertools import combinations
 from qutip import *
 
-"""
-Default Parameters are entered here
-"""
-#Lattice size
-L = 6   
+#Default Parameters are entered here
 t_init = 0.0 # Initial time
-t_final = 1.0 # Final time
-n_steps = 100 # Number of time steps
-
-#Power law decay of interactions
-beta = 1.0
+t_final = 10.0 # Final time
+n_steps = 3000 # Number of time steps
 
 desc = """Lindblad dissipative dynamics by exact diagonalization of 
 	    1d generalized Curie-Weiss model with long range interactions. See 
@@ -37,7 +30,7 @@ def input():
   parser = argparse.ArgumentParser(description=desc)
   
   parser.add_argument('-l', '--lattice_size', type=np.int64,\
-    help="size of the lattice", default=L)
+    help="size of the lattice", default=6)
   
   parser.add_argument('-omx', '--output_magx',\
     help="sx (magnetization) output file", default="sx_outfile.txt")
@@ -71,7 +64,7 @@ def input():
       action="store_true")
   
   parser.add_argument('-b', '--beta', type=np.float64, \
-    help="power law index for long range interactions", default=beta)
+    help="power law index for long range interactions", default=1.0)
 
   parser.add_argument('-x', '--hx', type=np.float64, \
     help="x transverse field", default=0.0)
@@ -158,13 +151,13 @@ class Hamiltonian:
       if(mu == 0):
 	  sm, sp, sz  = sigmam(), sigmap(), sigmaz()
       else:
-	  id = identity(2**mu)
-	  sm, sp, sz  = \
+        id = tensor([identity(2) for i in xrange(mu)])
+        sm, sp, sz  = \
 	    tensor(id,sigmam()), tensor(id,sigmap()), tensor(id,sigmaz())
 	#Right Hand Side    
       if(mu < lsize - 1):
-	    id = identity(2**(lsize-mu-1))
-	    sm, sp, sz = \
+          id = tensor([identity(2) for i in xrange(lsize-mu-1)])
+          sm, sp, sz = \
 	      tensor(sm, id), tensor(sp, id), tensor(sz, id)    
       return (np.sqrt(self.gud) * sm, np.sqrt(self.gdu) * sp, \
                                                  np.sqrt(self.gel/4) * sz)
@@ -175,44 +168,41 @@ class Hamiltonian:
       if(mu == 0):
 	  num_x, num_y, num_z  = sigmax(), sigmay(), sigmaz()
       else:
-	  id = identity(2**mu)
-	  num_x, num_y, num_z  = \
+        id = tensor([identity(2) for i in xrange(mu)])  
+        num_x, num_y, num_z  = \
 	    tensor(id,sigmax()), tensor(id,sigmay()), tensor(id,sigmaz())
       #Right Hand Side    
       if(mu < lsize - 1):
-	    id = identity(2**(lsize-mu-1))
-	    num_x, num_y, num_z = \
-	      tensor(num_x, id), tensor(num_y, id), tensor(num_z, id) 
-       
+          id = tensor([identity(2) for i in xrange(lsize-mu-1)])
+          num_x, num_y, num_z = \
+	      tensor(num_x, id), tensor(num_y, id), tensor(num_z, id)   
       return (num_x, num_y, num_z)
   
-  #NEEDS DEBUGGING    
   def kemats(self, sitepair):
     lsize = self.lattice_size
     (mu, nu) = sitepair
-    print sitepair
     #Left Hand Side    
     if(mu == 0):
-	ke_x, ke_y, ke_z = sigmax(), sigmay(), sigmaz()
+        ke_x, ke_y, ke_z = sigmax(), sigmay(), sigmaz()
     else:
-	id = identity(2**mu)
+	id = tensor([identity(2) for i in xrange(mu)])
 	ke_x, ke_y, ke_z = \
 	  tensor(id, sigmax()), tensor(id, sigmay()), tensor(id, sigmaz())
     #Middle Side
-    if mu==nu or np.abs(mu-nu)==1:
-        pass
+    if np.abs(mu-nu) == 1:
+        ke_x, ke_y, ke_z = \
+            tensor(ke_x, sigmax()), tensor(ke_y, sigmay()), tensor(ke_z, sigmaz())  
     else:
-        id = identity(2**(np.abs(mu-nu)-1))
+        id = tensor([identity(2) for i in xrange(np.abs(mu-nu)-1)])
         ke_x, ke_y, ke_z = \
         tensor(ke_x, id), tensor(ke_y, id), tensor(ke_z, id)
         ke_x, ke_y, ke_z = \
-            tensor(ke_x, sigmax()), tensor(ke_y, sigmay()), tensor(ke_z, sigmaz()) 
+            tensor(ke_x, sigmax()), tensor(ke_y, sigmay()), tensor(ke_z, sigmaz())    
     #Right Hand Side    
     if(nu < lsize - 1):
-      id = identity(2**(lsize-nu-1))
+      id = tensor([identity(2) for i in xrange(lsize-nu-1)]) 
       ke_x, ke_y, ke_z = \
       tensor(ke_x, id), tensor(ke_y, id), tensor(ke_z, id)
-    print ke_x
     return (ke_x, ke_y, ke_z) 
   
   def offd_corrmats(self, sitepair):
@@ -222,19 +212,22 @@ class Hamiltonian:
     if(mu == 0):
 	cxy, cxz, cyz = sigmax(), sigmax(), sigmay() 
     else:
-	id = identity(2**mu,2**mu)
-	cxy, cxz, cyz = \
+      id = tensor([identity(2) for i in xrange(mu)])  
+      cxy, cxz, cyz = \
 	  tensor(id, sigmax()), tensor(id, sigmax()), tensor(id, sigmay())
     #Middle Side
-    dim = 1 if mu == nu else 2**(np.abs(mu-nu)-1) 
-    id = identity(dim)
-    cxy, cxz, cyz = \
-      tensor(cxy, id), tensor(cxz, id), tensor(cyz, id)
-    cxy, cxz, cyz = \
-      tensor(cxy, sigmay()), tensor(cxz, sigmaz()), tensor(cyz, sigmaz()) 
+    if np.abs(mu-nu) == 1:
+        cxy, cxz, cyz = \
+          tensor(cxy, sigmay()), tensor(cxz, sigmaz()), tensor(cyz, sigmaz()) 
+    else:
+        id = tensor([identity(2) for i in xrange(np.abs(mu-nu)-1)])
+        cxy, cxz, cyz = \
+          tensor(cxy, id), tensor(cxz, id), tensor(cyz, id)
+        cxy, cxz, cyz = \
+          tensor(cxy, sigmay()), tensor(cxz, sigmaz()), tensor(cyz, sigmaz()) 
     #Right Hand Side    
     if(nu < self.lattice_size - 1):
-      id = identity(2**(lsize-nu-1))
+      id = tensor([identity(2) for i in xrange(lsize-nu-1)])
       cxy, cxz, cyz = \
       tensor(cxy, id), tensor(cxz, id), tensor(cyz, id)
     return (cxy, cxz, cyz) 
@@ -263,7 +256,7 @@ class Hamiltonian:
   
 class OutData:
   description = """Class to store output data"""
-  def __init__(self, t, sx, sy, sz, sxx, syy, szz, sxy, sxz, syz, szsz ,params):
+  def __init__(self, t, sx, sy, sz, sxx, syy, szz, sxy, sxz, syz, params):
       self.t_output = t
       self.sx, self.sy, self.sz = sx, sy, sz
       self.sxvar, self.syvar, self.szvar = sxx, syy, szz
@@ -342,9 +335,9 @@ def runising_dyn(params):
     for mu in xrange(h.lattice_size)]), axis=0)  
   j_sz = np.sum(np.array([h.dissmats(mu)[2] \
     for mu in xrange(h.lattice_size)]), axis=0)      
-        
+  
   result = mesolve(h.hamiltmat, initstate, t_output, [j_sm, j_sp, j_sz],\
-          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar])
+          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar], progress_bar=params.verbose)
   
   sxdata, sydata, szdata = result.expect[0], result.expect[1], result.expect[2] 
 
@@ -366,10 +359,11 @@ def runising_dyn(params):
     szdata.real, sxvar_data.real, syvar_data.real, \
       szvar_data.real, sxyvar_data.real, \
 	    sxzvar_data.real, syzvar_data.real, params)
-
-  print "\nDumping outputs to files ..."
+  if params.verbose:
+      print "\nDumping outputs to files ..."
   data.dump_data()
-  print 'Done'
+  if params.verbose:
+      print 'Done'
 
 if __name__ == '__main__':
   args_in = input()
