@@ -22,7 +22,7 @@
 #PBS -M daneel@utexas.edu
 #########################################################################
 NUM_THREADS=4
-BETA=1.0
+BETA=0.0
 LATSIZE=7
 
 HX=0.0
@@ -33,9 +33,9 @@ JX=0.0
 JY=0.0
 JZ=1.0
 
-GUD=0.1
-GDU=0.1
-GEL=0.08
+GUD=0.0
+GDU=0.0
+GEL=0.0
 
 SCRIPT="./curie_weiss_exact_lindblad.py"
 
@@ -51,7 +51,7 @@ BEGINTIME=$(date +"%s")
 python -W ignore $SCRIPT \
 	-l $LATSIZE -b $BETA \
 	-x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ \
-	-gud $GUD -gdu $GDU -gel $GEL -v
+	-gud $GUD -gdu $GDU -gel $GEL -n
 ENDTIME=$(date +"%s")
 ELAPSED_TIME=$(($ENDTIME-$BEGINTIME))
 echo "#Runtime: $(($ELAPSED_TIME / 60)) minutes and $(($ELAPSED_TIME % 60)) seconds."
