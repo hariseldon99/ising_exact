@@ -21,9 +21,9 @@
 #PBS -m ea
 #PBS -M daneel@utexas.edu
 #########################################################################
-NUM_THREADS=4
-BETA=0.0
-LATSIZE=7
+NUM_THREADS=2
+BETA=1.0
+LATSIZE=11
 
 HX=0.0
 HY=0.0

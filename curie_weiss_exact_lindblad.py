@@ -328,7 +328,8 @@ def runising_dyn(params):
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
   sxyvar, sxzvar, syzvar = (sxyvar/lsq), (sxzvar/lsq), (syzvar/lsq)
 
-  #Lindblad jump operators
+  #Lindblad jump operators. 
+  # DEBUG: I DO NOT THINK THINK THAT THESE SHOULD BE SUMMED, BUT CATTED
   j_sm = np.sum(np.array([h.dissmats(mu)[0] \
     for mu in xrange(h.lattice_size)]), axis=0)
   j_sp = np.sum(np.array([h.dissmats(mu)[1] \
