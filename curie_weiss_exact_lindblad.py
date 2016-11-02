@@ -15,7 +15,7 @@ from qutip import *
 
 #Default Parameters are entered here
 t_init = 0.0 # Initial time
-t_final = 10.0 # Final time
+t_final = 5.0 # Final time
 n_steps = 3000 # Number of time steps
 
 desc = """Lindblad dissipative dynamics by exact diagonalization of 
@@ -264,24 +264,24 @@ class OutData:
       self.__dict__.update(params.__dict__)
 
   def dump_data(self):
-      np.savetxt(self.output_magx, np.vstack((self.t_output, self.sx)).T,\
-	delimiter=' ')
-      np.savetxt(self.output_magy, np.vstack((self.t_output, self.sy)).T,
-		  delimiter=' ')
-      np.savetxt(self.output_magz, np.vstack((self.t_output, self.sz)).T,\
-	delimiter=' ')
+      np.savetxt(self.output_magx, \
+       np.vstack((self.t_output, self.sx.real, self.sx.imag)).T, delimiter=' ')
+      np.savetxt(self.output_magy, \
+       np.vstack((self.t_output, self.sy.real, self.sy.imag)).T, delimiter=' ')
+      np.savetxt(self.output_magz, \
+       np.vstack((self.t_output, self.sz.real, self.sz.imag)).T, delimiter=' ')
       np.savetxt(self.output_sxvar, \
-	np.vstack((self.t_output, self.sxvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.sxvar.real, self.sxvar.imag)).T, delimiter=' ')
       np.savetxt(self.output_syvar, \
-	np.vstack((self.t_output, self.syvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.syvar.real, self.syvar.imag)).T, delimiter=' ')
       np.savetxt(self.output_szvar, \
-	np.vstack((self.t_output, self.szvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.szvar.real, self.szvar.imag)).T, delimiter=' ')
       np.savetxt(self.output_sxyvar, \
-	np.vstack((self.t_output, self.sxyvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.sxyvar.real, self.sxyvar.imag)).T, delimiter=' ')
       np.savetxt(self.output_sxzvar, \
-	np.vstack((self.t_output, self.sxzvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.sxzvar.real, self.sxzvar.imag)).T, delimiter=' ')
       np.savetxt(self.output_syzvar, \
-	np.vstack((self.t_output, self.syzvar)).T, delimiter=' ')
+	np.vstack((self.t_output, self.syzvar.real, self.syzvar.imag)).T, delimiter=' ')
 
 def runising_dyn(params):
   if params.verbose:
@@ -328,18 +328,13 @@ def runising_dyn(params):
       for sitepair in combinations(xrange(h.lattice_size),2)]), axis=0)
   sxyvar, sxzvar, syzvar = (sxyvar/lsq), (sxzvar/lsq), (syzvar/lsq)
 
-  #Lindblad jump operators. 
-  # DEBUG: I DO NOT THINK THINK THAT THESE SHOULD BE SUMMED, BUT CATTED
-  j_sm = np.sum(np.array([h.dissmats(mu)[0] \
-    for mu in xrange(h.lattice_size)]), axis=0)
-  j_sp = np.sum(np.array([h.dissmats(mu)[1] \
-    for mu in xrange(h.lattice_size)]), axis=0)  
-  j_sz = np.sum(np.array([h.dissmats(mu)[2] \
-    for mu in xrange(h.lattice_size)]), axis=0)      
-  
+  #Lindblad jump operators.      
+  jump_ops = [h.dissmats(mu) for mu in xrange(h.lattice_size)]
+  jump_ops = list(sum(jump_ops, ()))
   pbar = True if params.verbose else None
-  result = mesolve(h.hamiltmat, initstate, t_output, [j_sm, j_sp, j_sz],\
-          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar], progress_bar=pbar)
+  result = mesolve(h.hamiltmat, initstate, t_output, jump_ops,\
+          [sx, sy, sz, sxvar, syvar, szvar, sxyvar, sxzvar, syzvar], \
+                                                             progress_bar=pbar)
   
   sxdata, sydata, szdata = result.expect[0], result.expect[1], result.expect[2] 
 
@@ -357,10 +352,10 @@ def runising_dyn(params):
   sxzvar_data = 2.0 * sxzvar_data - (sxdata) * (szdata)
   syzvar_data = 2.0 * syzvar_data - (sydata) * (szdata)
      
-  data = OutData(t_output,sxdata.real, sydata.real, \
-    szdata.real, sxvar_data.real, syvar_data.real, \
-      szvar_data.real, sxyvar_data.real, \
-	    sxzvar_data.real, syzvar_data.real, params)
+  data = OutData(t_output,sxdata, sydata, \
+    szdata.real, sxvar_data, syvar_data, \
+      szvar_data, sxyvar_data, \
+	    sxzvar_data, syzvar_data, params)
   if params.verbose:
       print "\nDumping outputs to files ..."
   data.dump_data()
