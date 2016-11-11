@@ -4,7 +4,7 @@ __doc__ = """
 Created on July 02 2016
 @author: Analabha Roy (daneel@utexas.edu)
 
-Floquet Matrix formulation and diagonalization of the Bose Hubbard model with 
+Floquet Matrix formulation and diagonalization of the Bose Hubbard model with
 periodic drive (rectangular wave):
 
 To be run as as an imported module.
@@ -37,7 +37,7 @@ Usage:
     >>> mods.sqrtabs()
     >>> mods.view()
 
-Note: 
+Note:
     To get the above usage in a python script, just re-execute (in bash shell)
     and grep the python shell prompts
 
@@ -123,164 +123,164 @@ def vprint_eigen(verbosity, solver):
 
 class ParamData:
     """
-    Class that stores Hamiltonian matrices and and system parameters. 
+    Class that stores Hamiltonian matrices and and system parameters.
     """
     def __init__(self, lattice_size=3, particle_no=3, amp=1.0, freq=1.0, \
                  duty_cycle=0.5, int_strength=1.0, field=None,lapack=False,\
-                                     mpicomm=PETSc.COMM_WORLD, verbose=False):                       
-      """
-       Usage:
-       p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
-            int_strength=1.0, disorder_strength=1.0, mpicomm=comm)
-		      
-       All parameters (arguments) are optional.
-       
-       Parameters:
-       lattice_size = The size of your lattice as an integer.
-       particle_no  = The number of particles (bosons) in the lattice 
-       amp          = The periodic (rectangle) drive amplitude. Defaults to 1.
-       freq   	    = The periodic (rectangle) drive frequency. Defaults to 1.
-       duty_cycle   = The duty cycle of the rectangular wave. Betwn 0-1. 
-                       Defaults to 0.5 (square wave) 
-       int_strength = The interaction strength U of the Bose Hubbard model.
-                       Defaults to 1.
-       field        = Optional numpy array of spatially varying field. 
-                       Defaults to None.
-       lapack       = Boolean. Default False. Use serial lapack to diagonalize 
-                       the hamiltonian.   
-       mpicomm      = MPI Communicator. Defaults to PETSc.COMM_WORLD
-       verbose      = Boolean for verbose output. Defaults to False
+                                     mpicomm=PETSc.COMM_WORLD, verbose=False):
+        """
+         Usage:
+         p = ParamData(lattice_size=3, particle_no=3, amp=1.0, freq=0.0, \
+              int_strength=1.0, disorder_strength=1.0, mpicomm=comm)
 
-       Return value: 
-       An object that stores all the parameters above, as well as the fock states
-       and the kinetic and potential energy matrices. Also ground state stored
-       as a petsc vec. Finally, the matrix elements of the off-diagonal order 
-       parameter a^\dagger_0 a_[M/2] (M = lattice_size) are stored.
-      """
-      self.lattice_size = lattice_size
-      self.particle_no = particle_no
-      self.amp, self.freq = amp, freq
-      assert 0. <= duty_cycle <= 1. , "Please enter a duty cycle between 0 and 1"
-      self.duty_cycle = duty_cycle
-      self.int_strength = int_strength
-      self.comm = mpicomm
-      self.verbose = verbose
-      n,m = self.particle_no, self.lattice_size    
-      rank = self.comm.Get_rank()
-      if field is not None:
-          assert type(field).__module__ == np.__name__, "Field needs a numpy array"
-          assert field.size >= lattice_size, "Field array too small"
-          h = field.flatten() if rank == 0 else None
-          h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root
-          self.field = True
-      else:
-          self.field = False
-          h = 0.0
-      #Dimensionality of the hilbert space
-      self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
-      size = self.comm.Get_size()      
-      assert self.dimension >= size, "There are fewer rows than MPI procs!"
-      d = self.dimension
-      if rank == 0:
-          verboseprint(self.verbose, vars(self))
-      self.tagweights = np.sqrt(100 * np.arange(m) + 3)
-      if rank == 0:
-          #Build the dxm-size fock state matrix as per ref[1] in docstring
-          self.all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
-          self.fockstate_tags = np.zeros(d)
-          for row_i, row in enumerate(self.boxings(n,m)):
-              self.all_fockstates[row_i,:] = row
-              row = np.array(row)
-              self.fockstate_tags[row_i] = self.tagweights.dot(row)
-          #Sort the tags and store the original indices
-          self.tag_inds = np.argsort(self.fockstate_tags)
-          self.fockstate_tags = self.fockstate_tags[self.tag_inds]
-      else:
-          self.all_fockstates = None          
-          self.tag_inds = None          
-          self.fockstate_tags = None
-      self.all_fockstates = self.comm.tompi4py().bcast(self.all_fockstates, root=0)        
-      self.tag_inds = self.comm.tompi4py().bcast(self.tag_inds, root=0)    
-      self.fockstate_tags = self.comm.tompi4py().bcast(self.fockstate_tags, root=0)    
-      #Build the interaction + field part of the hamiltonian
-      self.hamilt_int = PETSc.Mat().create(comm=self.comm)
-      self.hamilt_int.setSizes([d,d])
-      self.hamilt_int.setUp() 
-      rstart, rend = self.hamilt_int.getOwnershipRange()
-      self.int_matset(self.hamilt_int, (rstart, rend),h)
-      self.hamilt_int.assemble()
-      #Now, set the kinetic energy matrix separately
-      self.hamilt_ke = self.hamilt_int.duplicate()
-      rstart, rend = self.hamilt_ke.getOwnershipRange()
-      for site in xrange(m):  
-              next_site = 0 if site==m-1 else site+1 #Periodic bc
-              self.ke_matset(self.hamilt_ke, site, next_site, (rstart, rend))
-      self.hamilt_ke.assemble()
-      #Now, set the off diagonal order parameter matrix elements
-      self.offd_order = self.hamilt_int.duplicate()
-      rstart, rend = self.offd_order.getOwnershipRange()
-      site, next_site = 0, np.floor(self.lattice_size/2.)
-      self.ke_matset(self.offd_order, site, next_site, (rstart, rend))
-      self.offd_order.assemble()
-      #Now, get the ground state ONLY using SLEPc
-      E = SLEPc.EPS() 
-      E.create()
-      E.setOperators(self.hamilt_ke + self.hamilt_int)
-      if lapack:
-          E.setType(SLEPc.EPS.Type.LAPACK)
-      E.setProblemType(SLEPc.EPS.ProblemType.HEP)
-      E.setWhichEigenpairs(SLEPc.EPS.Which.SMALLEST_REAL)
-      E.solve()
-      nconv = vprint_eigen(self.verbose, E)
-      assert nconv >= 1, "Convergence of ground state eigensolver failed!!!"
-      self.groundstate, wr = self.hamilt_ke.getVecs()
-      vi, wi = self.hamilt_ke.getVecs()
-      self.groundstate_energy = E.getEigenpair(0, self.groundstate, vi)
-      #Complexify the eigenvector by vr = (1j)* vi + vr
-      self.groundstate.axpy(1j,vi)           
+         All parameters (arguments) are optional.
+
+         Parameters:
+         lattice_size = The size of your lattice as an integer.
+         particle_no  = The number of particles (bosons) in the lattice
+         amp          = The periodic (rectangle) drive amplitude. Defaults to 1.
+         freq         = The periodic (rectangle) drive frequency. Defaults to 1.
+         duty_cycle   = The duty cycle of the rectangular wave. Betwn 0-1.
+                         Defaults to 0.5 (square wave)
+         int_strength = The interaction strength U of the Bose Hubbard model.
+                         Defaults to 1.
+         field        = Optional numpy array of spatially varying field.
+                         Defaults to None.
+         lapack       = Boolean. Default False. Use serial lapack to diagonalize
+                         the hamiltonian.
+         mpicomm      = MPI Communicator. Defaults to PETSc.COMM_WORLD
+         verbose      = Boolean for verbose output. Defaults to False
+
+         Return value:
+         An object that stores all the parameters above, as well as the fock states
+         and the kinetic and potential energy matrices. Also ground state stored
+         as a petsc vec. Finally, the matrix elements of the off-diagonal order
+         parameter a^\dagger_0 a_[M/2] (M = lattice_size) are stored.
+        """
+        self.lattice_size = lattice_size
+        self.particle_no = particle_no
+        self.amp, self.freq = amp, freq
+        assert 0. <= duty_cycle <= 1. , "Please enter a duty cycle between 0 and 1"
+        self.duty_cycle = duty_cycle
+        self.int_strength = int_strength
+        self.comm = mpicomm
+        self.verbose = verbose
+        n,m = self.particle_no, self.lattice_size
+        rank = self.comm.Get_rank()
+        if field is not None:
+            assert type(field).__module__ == np.__name__, "Field needs a numpy array"
+            assert field.size >= lattice_size, "Field array too small"
+            h = field.flatten() if rank == 0 else None
+            h = self.comm.tompi4py().bcast(h, root=0) #sync field vals w root
+            self.field = True
+        else:
+            self.field = False
+            h = 0.0
+        #Dimensionality of the hilbert space
+        self.dimension = np.int(factorial(n+m-1)/(factorial(n) * factorial(m-1)))
+        size = self.comm.Get_size()
+        assert self.dimension >= size, "There are fewer rows than MPI procs!"
+        d = self.dimension
+        if rank == 0:
+            verboseprint(self.verbose, vars(self))
+        self.tagweights = np.sqrt(100 * np.arange(m) + 3)
+        if rank == 0:
+            #Build the dxm-size fock state matrix as per ref[1] in docstring
+            self.all_fockstates =  lil_matrix((d, m), dtype=ode_dtype)
+            self.fockstate_tags = np.zeros(d)
+            for row_i, row in enumerate(self.boxings(n,m)):
+                self.all_fockstates[row_i,:] = row
+                row = np.array(row)
+                self.fockstate_tags[row_i] = self.tagweights.dot(row)
+            #Sort the tags and store the original indices
+            self.tag_inds = np.argsort(self.fockstate_tags)
+            self.fockstate_tags = self.fockstate_tags[self.tag_inds]
+        else:
+            self.all_fockstates = None
+            self.tag_inds = None
+            self.fockstate_tags = None
+        self.all_fockstates = self.comm.tompi4py().bcast(self.all_fockstates, root=0)
+        self.tag_inds = self.comm.tompi4py().bcast(self.tag_inds, root=0)
+        self.fockstate_tags = self.comm.tompi4py().bcast(self.fockstate_tags, root=0)
+        #Build the interaction + field part of the hamiltonian
+        self.hamilt_int = PETSc.Mat().create(comm=self.comm)
+        self.hamilt_int.setSizes([d,d])
+        self.hamilt_int.setUp()
+        rstart, rend = self.hamilt_int.getOwnershipRange()
+        self.int_matset(self.hamilt_int, (rstart, rend),h)
+        self.hamilt_int.assemble()
+        #Now, set the kinetic energy matrix separately
+        self.hamilt_ke = self.hamilt_int.duplicate()
+        rstart, rend = self.hamilt_ke.getOwnershipRange()
+        for site in xrange(m):
+            next_site = 0 if site==m-1 else site+1 #Periodic bc
+            self.ke_matset(self.hamilt_ke, site, next_site, (rstart, rend))
+        self.hamilt_ke.assemble()
+        #Now, set the off diagonal order parameter matrix elements
+        self.offd_order = self.hamilt_int.duplicate()
+        rstart, rend = self.offd_order.getOwnershipRange()
+        site, next_site = 0, np.floor(self.lattice_size/2.)
+        self.ke_matset(self.offd_order, site, next_site, (rstart, rend))
+        self.offd_order.assemble()
+        #Now, get the ground state ONLY using SLEPc
+        E = SLEPc.EPS()
+        E.create()
+        E.setOperators(self.hamilt_ke + self.hamilt_int)
+        if lapack:
+            E.setType(SLEPc.EPS.Type.LAPACK)
+        E.setProblemType(SLEPc.EPS.ProblemType.HEP)
+        E.setWhichEigenpairs(SLEPc.EPS.Which.SMALLEST_REAL)
+        E.solve()
+        nconv = vprint_eigen(self.verbose, E)
+        assert nconv >= 1, "Convergence of ground state eigensolver failed!!!"
+        self.groundstate, wr = self.hamilt_ke.getVecs()
+        vi, wi = self.hamilt_ke.getVecs()
+        self.groundstate_energy = E.getEigenpair(0, self.groundstate, vi)
+        #Complexify the eigenvector by vr = (1j)* vi + vr
+        self.groundstate.axpy(1j,vi)
 
     def ke_matset(self, mat, i, j, local_block):
-          """
-          Sets all the matrix elements of kinetic energy 'mat' in the fock state
-          representation that come from the lattice sites 'i' and 'j'
-          """               
-          i,j = int(i), int(j)                                                  
-          for v, fock_v in enumerate(self.all_fockstates):
-              fock_v = fock_v.toarray().flatten()
-              #Note that, if any site has no particles, then one annihilation
-              #operator nullifies the whole state
-              if fock_v[j] != 0:
-                  #Hop a particle in fock_v from i to i+1 & store.
-                  fockv_hopped = np.copy(fock_v)
-                  fockv_hopped[i] += 1
-                  fockv_hopped[j] -= 1
-                  #Tag this hopped vector
-                  tag = self.tagweights.dot(fockv_hopped)
-                  #Binary search for this tag in the sorted array of tags
-                  w = self.index(self.fockstate_tags, tag) 
-                  #Get the corresponding row index 
-                  u = self.tag_inds[w]
-                  rstart, rend = local_block
-                  if rstart <= u < rend: #set local row val only
-                      val = -np.sqrt((fock_v[i]+1) * fock_v[j])
-                      mat[u,v] = val
-                      mat[v,u] = val
-     
-    def int_matset(self, mat, local_block, field):
-        U = self.int_strength  
+        """
+        Sets all the matrix elements of kinetic energy 'mat' in the fock state
+        representation that come from the lattice sites 'i' and 'j'
+        """
+        i,j = int(i), int(j)
         for v, fock_v in enumerate(self.all_fockstates):
-            (rstart, rend) = local_block    
+            fock_v = fock_v.toarray().flatten()
+            #Note that, if any site has no particles, then one annihilation
+            #operator nullifies the whole state
+            if fock_v[j] != 0:
+                #Hop a particle in fock_v from i to i+1 & store.
+                fockv_hopped = np.copy(fock_v)
+                fockv_hopped[i] += 1
+                fockv_hopped[j] -= 1
+                #Tag this hopped vector
+                tag = self.tagweights.dot(fockv_hopped)
+                #Binary search for this tag in the sorted array of tags
+                w = self.index(self.fockstate_tags, tag)
+                #Get the corresponding row index
+                u = self.tag_inds[w]
+                rstart, rend = local_block
+                if rstart <= u < rend: #set local row val only
+                    val = -np.sqrt((fock_v[i]+1) * fock_v[j])
+                    mat[u,v] = val
+                    mat[v,u] = val
+
+    def int_matset(self, mat, local_block, field):
+        U = self.int_strength
+        for v, fock_v in enumerate(self.all_fockstates):
+            (rstart, rend) = local_block
             if rstart <= v < rend: #set locally
-              fockv_den = fock_v.toarray()
-              mat[v,v] = np.sum(fockv_den * (U * (fockv_den-1) - field))
-    
+                fockv_den = fock_v.toarray()
+                mat[v,v] = np.sum(fockv_den * (U * (fockv_den-1) - field))
+
     def orderparam(self, state):
         """
         This gets the order parameter of the state vector provided
         i.e, the expectation value of the offd_order matrix in ParamData.
         See "Penrose Onsager criterion" [2].
         """
-        dummy, new_vector =  self.offd_order.getVecs()  
+        dummy, new_vector =  self.offd_order.getVecs()
         self.offd_order.mult(state, new_vector)
         return np.abs(new_vector.dot(state))
 
@@ -307,25 +307,25 @@ class ParamData:
                     seq[:i+1] = [x-1] * (i+1)
                     break
             else:
-                return            
+                return
 
 class FloquetMatrix:
-    
+
     def __init__(self, params):
         """
         Class that evaluates the Floquet Matrix of a time-periodically
         driven Bose Hubbard model
         Usage:
             HF = FloquetMatrix(p)
-       
+
         Argument:
             p = An object instance of the ParamData class.
 
-        Return value: 
-            An object that stores an initiated PETSc Floquet Matrix 
+        Return value:
+            An object that stores an initiated PETSc Floquet Matrix
         """
-        pass        
-    
+        pass
+
     def solve_exp(self, t, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = exp(-IHt)|b>
@@ -339,7 +339,7 @@ class FloquetMatrix:
         f.setScale(s)
         M.setTolerances(slepc_mtol)
         M.solve(b,x)
-            
+
     def solve_pow(self, n, H, b, x):
         """
         Setup the and solve the petsc matrix function |x> = H^n|b>
@@ -356,7 +356,7 @@ class FloquetMatrix:
 
     def isdiag(self, A):
         """
-        Checks PETSc matrix to determine if diag. It stores diag, zeros it and 
+        Checks PETSc matrix to determine if diag. It stores diag, zeros it and
         calcs the inf-norm/size. If small, then matrix sans diag is 0. Then reset.
         """
         size = A.getSize()
@@ -371,7 +371,7 @@ class FloquetMatrix:
         A.setDiagonal(diag)
         A.assemble()
         return is_diag
-        
+
     def ralloc(self, mat, row, vec):
         """
         Allocate the data in petsc vec to the row in petsc mat
@@ -380,11 +380,11 @@ class FloquetMatrix:
         loc_idx = range(locfirst, loclast)
         dataloc = vec.getArray()
         mat.setValues([row],loc_idx,dataloc)
-        
+
     def generate(self, params):
         """
         This evaluates the Floquet Matrix of rectangle wave drive
-        If the Hamiltonian is H_1 for the first cycle of the period  
+        If the Hamiltonian is H_1 for the first cycle of the period
         and H_2 for the second cycle of the period. Then Floquet
         Matrix is exp(-I H_2 (T-t)) \times exp(-I H_1 t).
         Usage:
@@ -405,7 +405,7 @@ class FloquetMatrix:
         fmat_1.assemble()
         t2 = (1.0 - params.duty_cycle) * T
         hamilt_2 = (1.0 - params.amp) * params.hamilt_ke + params.hamilt_int
-        assert self.isdiag(hamilt_2) == False, "Hamiltonian is diagonal. Krylov fails"        
+        assert self.isdiag(hamilt_2) == False, "Hamiltonian is diagonal. Krylov fails"
         fmat_2 = fmat_1.duplicate()
         for col in xrange(params.dimension):
             unit.set(0)
@@ -418,12 +418,12 @@ class FloquetMatrix:
         fmat_1.assemble()
         fmat_2.assemble()
         self.fmat = fmat_2.matMult(fmat_1)
-        
+
     def evolve(self, time, params):
         """
         This evolves the ground state by integer multiples of the time period.
         It raises the Floquet matrix to the nth power and multiplies to the state.
-        
+
         Usage:
             HF = FloquetMatrix(p)
             HF.generate(p)
@@ -432,22 +432,22 @@ class FloquetMatrix:
             time      = This needs to be an integer. The state will be evolved
                         in integer multiples of the time period i.e 2*pi/p.freq
             p         = An object instance of the ParamData class.
-            
+
         Return value:
             PETSc vec of the final state
         """
-        assert self.isdiag(self.fmat) == False, "Hamiltonian is diagonal. Krylov fails"        
+        assert self.isdiag(self.fmat) == False, "Hamiltonian is diagonal. Krylov fails"
         #We want to compute self.fmat^time |self.groundstate>
         assert isinstance( time , ( int, long ) ), "Time needs to be an integer"
         dummy, final_state = self.fmat.getVecs()
         self.solve_pow(time, self.fmat, params.groundstate, final_state)
         return final_state
-        
+
     def eigensys(self, params, get_evecs=False, cachedir=None, lapack=False):
         """
         This diagonalizes the Floquet Matrix after evolution. Outputs the
         evals. It used PETSc/SLEPc to do this.
-        
+
         Usage:
             HF = FloquetMatrix(p)
             HF.evolve(p)
@@ -455,22 +455,22 @@ class FloquetMatrix:
         Arguments:
             p            = An object instance of the ParamData class.
             get_evecs    = Boolean (optional, default False). Set to true
-                            for getting the eigenvector matrix (row wise)                
-            cachedir     = Directory path as a string (optional, default None). 
-                            If provided, then it is used to cache large Floquet 
+                            for getting the eigenvector matrix (row wise)
+            cachedir     = Directory path as a string (optional, default None).
+                            If provided, then it is used to cache large Floquet
                             matrices to temp file in there instead of memory.
-            lapack       = Boolean. Default False. Use serial lapack to 
+            lapack       = Boolean. Default False. Use serial lapack to
                             diagonalize the Floquet matrix.
-        Return value: 
+        Return value:
             Tuple consisting of eigenvalues (array) and their errors both as
-            PETSc vectors. If evaluated, the eigenvector matrix is stored as 
+            PETSc vectors. If evaluated, the eigenvector matrix is stored as
             PETSc Mat COLUMN WISE in "HF.evecs"
-        """     
-        #Initiate the SLEPc solver to diagonalize the matrix    
-        E = SLEPc.EPS() 
+        """
+        #Initiate the SLEPc solver to diagonalize the matrix
+        E = SLEPc.EPS()
         E.create()
         #Now, cache large Floquet matrix to disk before passing it to the solver
-        rank = params.comm.Get_rank()    
+        rank = params.comm.Get_rank()
         if cachedir == None :
             cache = False
             cfile = None
@@ -488,7 +488,7 @@ class FloquetMatrix:
             viewer = PETSc.Viewer().createBinary(fname, 'w')
             viewer.pushFormat(viewer.Format.NATIVE)
             viewer.view(self.fmat)
-            viewer = PETSc.Viewer().createBinary(fname, 'r')    
+            viewer = PETSc.Viewer().createBinary(fname, 'r')
             fmat_loc = self.fmat.duplicate()
             fmat_loc.load(viewer)
         #Finish setting up the eigensolver and execute it
@@ -521,11 +521,11 @@ class FloquetMatrix:
         if get_evecs:
             self.evecs.assemble()
             self.evecs.transpose() #For column ordering
-        #Synchronize and have root close the cache file, if caching is done         
-        params.comm.tompi4py().barrier()        
+        #Synchronize and have root close the cache file, if caching is done
+        params.comm.tompi4py().barrier()
         if cache and rank == 0:
-            cfile.close()            
+            cfile.close()
         return (evals, evals_err)
-        
+
 if __name__ == '__main__':
     Print(__doc__)
