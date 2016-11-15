@@ -118,6 +118,7 @@ class ParamData:
         self.jvec = np.array([args.jx, args.jy, args.jz])
         self.hvec = np.array([args.hx, args.hy, args.hz])
         self.jmat, self.lattice_size = get_jmat_obc(args)
+        lsize = self.lattice_size
         self.norm =\
           np.sum(1/(pow(np.arange(1, lsize+1), args.beta).astype(float)))
         if args.nonorm:
