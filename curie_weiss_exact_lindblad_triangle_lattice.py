@@ -108,7 +108,7 @@ def get_jmat_obc(args):
             d = norm(pi-pj)
             if i!=j:
                 J[i,j] = 1./pow(d,alpha)
-    return J
+    return J, N
 
 class ParamData:
     description = """Class to store parameters and hopping matrix"""
@@ -117,8 +117,7 @@ class ParamData:
         self.__dict__.update(args.__dict__)
         self.jvec = np.array([args.jx, args.jy, args.jz])
         self.hvec = np.array([args.hx, args.hy, args.hz])
-        lsize = self.lattice_size
-        self.jmat = get_jmat_obc(args)
+        self.jmat, self.lattice_size = get_jmat_obc(args)
         self.norm =\
           np.sum(1/(pow(np.arange(1, lsize+1), args.beta).astype(float)))
         if args.nonorm:
