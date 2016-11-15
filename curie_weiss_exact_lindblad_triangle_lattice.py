@@ -15,8 +15,8 @@ from qutip import *
 
 #Default Parameters are entered here
 t_init = 0.0 # Initial time
-t_final = 5.0 # Final time
-n_steps = 3000 # Number of time steps
+t_final = 6.0 # Final time
+n_steps = 10000 # Number of time steps
 
 desc = """Lindblad dissipative dynamics by exact diagonalization of
             1d generalized Curie-Weiss model with long range interactions. See
