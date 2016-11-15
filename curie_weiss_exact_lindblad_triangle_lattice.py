@@ -107,7 +107,7 @@ def get_jmat_obc(args):
             pj = points[j]
             d = norm(pi-pj)
             if i!=j:
-                J[i,j] = 1./pow(d,alpha)
+                J[i,j] = 1./pow(d,args.beta)
     return J, N
 
 class ParamData:
