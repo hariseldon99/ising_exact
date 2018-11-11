@@ -27,10 +27,8 @@ JX=0.0
 JY=0.0
 JZ=1.0
 
-GUD=0.0
-GDU=0.0
-GEL=0.0
-
+AMPL=1.0
+FREQ=1.0
 
 ## Name of python script to be executed
 SCRIPT="./curie_weiss_1d_periodic.py"
@@ -49,7 +47,7 @@ BEGINTIME=$(date +"%s")
 python -W ignore $SCRIPT \
 	-l $LATSIZE -b $BETA \
 	-x $HX -y $HY -z $HZ -jx $JX -jy $JY -jz $JZ \
-	-gud $GUD -gdu $GDU -gel $GEL -n
+	-a $AMPL -w $FREQ -n
 ENDTIME=$(date +"%s")
 ELAPSED_TIME=$(($ENDTIME-$BEGINTIME))
 echo "#Runtime: $(($ELAPSED_TIME / 60)) minutes and $(($ELAPSED_TIME % 60)) seconds."

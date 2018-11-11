@@ -20,13 +20,14 @@ Default Parameters are entered here
 L = 6
 t_init = 0.0 # Initial time
 t_final = 10.0 # Final time
-n_steps = 300 # Number of time steps
+n_steps = 1000 # Number of time steps
 
 #Power law decay of interactions
 beta = 1.0
 
 desc = """Dynamics by exact diagonalization of
-                1d generalized Curie-Weiss model with long range interactions"""
+                1d generalized Curie-Weiss model with long range interactions
+                and periodic drive"""
 
 #Pauli matrices
 sig_x, sig_y, sig_z = \
@@ -82,6 +83,9 @@ def input():
       help="y transverse field", default=0.0)
     parser.add_argument('-z', '--hz', type=np.float64, \
       help="z transverse field", default=0.0)
+    
+    parser.add_argument('-a', '--ampl', type=np.float64, \
+                        help="drive amplitude", default=1.0)
     parser.add_argument('-w', '--freq', type=np.float64, \
                         help="drive frequency", default=0.0)
 
@@ -129,6 +133,7 @@ class ParamData:
         self.jvec = np.array([args.jx, args.jy, args.jz])
         self.hvec = np.array([args.hx, args.hy, args.hz])
         self.omega = args.freq
+        self.ampl = args.ampl
 
         lsize = self.lattice_size
         if args.periodic:
@@ -238,15 +243,17 @@ class Hamiltonian:
 
 def jac(y, t0, jacmat, hamilt, params):
     omega = params.omega
+    ampl = params.ampl
+    drive = ampl * np.cos(omega*t0)
     (rows,cols) = hamilt.hamiltmat.shape
     jacmat[0:rows, 0:cols] = hamilt.hamiltmat.imag + \
-                                    np.cos(omega*t0) * hamilt.trans_hamilt.imag
+                                 drive * hamilt.trans_hamilt.imag
     jacmat[0:rows, cols:] = hamilt.hamiltmat.real+ \
-                                    np.cos(omega*t0) * hamilt.trans_hamilt.real
+                                drive * hamilt.trans_hamilt.real
     jacmat[rows:, 0:cols] = - hamilt.hamiltmat.real - \
-                                    np.cos(omega*t0) * hamilt.trans_hamilt.real
+                                drive * hamilt.trans_hamilt.real
     jacmat[rows:, cols:] = hamilt.hamiltmat.imag + \
-                                    np.cos(omega*t0) * hamilt.trans_hamilt.imag
+                                drive * hamilt.trans_hamilt.imag
     return jacmat
 
 def func(y, t0, jacmat, hamilt, params):
